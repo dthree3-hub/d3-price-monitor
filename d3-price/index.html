@@ -1,0 +1,3062 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>D3 Price Console</title>
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --ink: #1f2329;
+        --line: #e3e6ea;
+        --accent: #2f6f8f;
+        --accent-2: #5c7c4f;
+        --danger: #d1453b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font: 14px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      main {
+        width: 95vw;
+        max-width: 1760px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .hero {
+        background: rgba(255, 250, 243, 0.88);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(87, 57, 11, 0.08);
+      }
+
+      .hero small {
+        display: inline-block;
+        margin-top: 8px;
+        color: #735632;
+      }
+
+      .controls,
+      .report-wrap,
+      .table-wrap {
+        margin-top: 18px;
+        background: rgba(255, 250, 243, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(87, 57, 11, 0.06);
+      }
+
+      .controls-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .dropzone {
+        border: 2px dashed var(--line);
+        border-radius: 16px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.65);
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 24px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button,
+      .file-label {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 10px 14px;
+        font: inherit;
+        cursor: pointer;
+        color: white;
+        background: var(--accent);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      button.secondary,
+      .file-label.secondary {
+        background: white;
+        color: var(--ink);
+        border-color: var(--line);
+      }
+
+      button.danger {
+        background: var(--danger);
+      }
+
+      input[type="file"] {
+        display: none;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 130px;
+        resize: vertical;
+        margin-top: 10px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        padding: 12px;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .filters input {
+        min-width: 220px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.84);
+        font: inherit;
+      }
+
+      .filters select {
+        min-width: 180px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.84);
+        font: inherit;
+      }
+
+      .link-intake {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .link-intake textarea {
+        min-height: 100px;
+      }
+
+      .link-intake-result {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: #fff;
+        border: 1px solid rgba(215, 193, 154, 0.9);
+        white-space: pre-wrap;
+        font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .table-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .table-bar h2 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .table-bar p {
+        margin-top: 4px;
+        color: #735632;
+      }
+
+      .table-toggle {
+        flex-shrink: 0;
+      }
+
+      .table-panel[hidden] {
+        display: none;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 10px 8px;
+        border-bottom: 1px solid rgba(215, 193, 154, 0.7);
+      }
+
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #735632;
+      }
+
+      td.mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .muted {
+        color: #735632;
+      }
+
+      .report-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .competitor-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .competitor-card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .competitor-card h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .competitor-meta {
+        margin-top: 4px;
+        color: #735632;
+        font-size: 13px;
+      }
+
+      .model-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .model-item {
+        border-top: 1px solid rgba(215, 193, 154, 0.6);
+        padding-top: 10px;
+      }
+
+      .model-item strong {
+        display: block;
+      }
+
+      .variant-list {
+        display: grid;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .variant-row {
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(246, 239, 227, 0.85);
+      }
+
+      .variant-row.up {
+        background: rgba(158, 61, 44, 0.10);
+      }
+
+      .variant-row.down {
+        background: rgba(92, 124, 79, 0.12);
+      }
+
+      .variant-row.new {
+        background: rgba(154, 107, 22, 0.10);
+      }
+
+      .report-card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .report-card strong {
+        font-size: 16px;
+      }
+
+      .report-meta {
+        margin-top: 6px;
+        color: #735632;
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(92, 124, 79, 0.14);
+        color: #27401f;
+      }
+
+      .pill.out {
+        background: rgba(158, 61, 44, 0.12);
+        color: #7b2416;
+      }
+
+      @media (max-width: 720px) {
+        h1 {
+          font-size: 26px;
+        }
+
+        .table-wrap {
+          overflow-x: auto;
+        }
+
+        table {
+          min-width: 900px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+
+<div id="d3-login" style="position:fixed;inset:0;background:#f6efe3;display:flex;align-items:center;justify-content:center;z-index:9999999;font-family:'Segoe UI',sans-serif">
+  <div style="background:#fffaf3;border:2px solid #9a6b16;border-radius:18px;padding:30px 26px;width:300px;text-align:center;box-shadow:0 12px 36px rgba(0,0,0,.18)">
+    <div style="font-size:22px;font-weight:800;color:#231b11">D3 Price Monitor</div>
+    <div style="color:#735632;margin:6px 0 18px">Enter password to continue</div>
+    <input id="d3-pw" type="password" placeholder="Password" style="width:100%;padding:11px;border:1px solid #d7c19a;border-radius:10px;font-size:15px;box-sizing:border-box">
+    <div id="d3-pw-err" style="color:#9e3d2c;font-size:13px;min-height:18px;margin:8px 0"></div>
+    <button id="d3-pw-btn" style="width:100%;padding:11px;border:0;border-radius:10px;background:#9a6b16;color:#fff;font-size:15px;cursor:pointer">Sign in</button>
+  </div>
+</div>
+<script>
+(function(){
+  var HASH='f04c2db965e5fa75bce3b69d0924a3fa68624dd7e96b3afe55b21b2154ff63ca';var K='d3-auth-ok';
+  function reveal(){var el=document.getElementById('d3-login');if(el)el.remove();}
+  if(sessionStorage.getItem(K)==='1'){reveal();return;}
+  async function sha(s){var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('');}
+  async function go(){var pw=document.getElementById('d3-pw').value;var h=await sha(pw);if(h===HASH){sessionStorage.setItem(K,'1');reveal();}else{document.getElementById('d3-pw-err').textContent='Wrong password';}}
+  document.getElementById('d3-pw-btn').onclick=go;
+  document.getElementById('d3-pw').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
+  setTimeout(function(){var i=document.getElementById('d3-pw');if(i)i.focus();},50);
+})();
+</script>
+
+    <main>
+      <section class="hero">
+        <h1>D3 Price Console</h1>
+        <p>Drop in the JSON exported by the bookmarklet to monitor competitor phone variants in one place, then export a consolidated CSV for your internal system or Google Sheet.</p>
+        <small>This page loads `/data/records.json` by default and also supports manual JSON imports. It does not access Shopee directly.</small>
+      </section>
+
+      <section class="controls">
+        <div class="actions">
+          <label class="file-label" for="fileInput">Import JSON files</label>
+          <input id="fileInput" type="file" accept=".json,application/json" multiple>
+          <button id="exportCsv">Export summary CSV</button>
+          <button id="exportJson" class="secondary">Export summary JSON</button>
+          <button id="clearAll" class="danger">Clear current data</button>
+        </div>
+
+        <div class="controls-grid">
+          <div class="dropzone" id="dropzone">
+            <strong>Drag and drop import</strong>
+            <p class="muted">Drop multiple `d3-shopee-price-*.json` files here at once.</p>
+          </div>
+          <div>
+            <strong>Paste JSON</strong>
+            <textarea id="pasteInput" placeholder='Supports a single record object or an array like [ {...}, {...} ]'></textarea>
+            <div class="actions" style="margin-top:10px">
+              <button id="importPaste" class="secondary">Import pasted JSON</button>
+            </div>
+          </div>
+          <div class="link-intake">
+            <strong>Add Shopee links to watchlist</strong>
+            <p class="muted">Paste one or more Shopee links. This tool checks duplicates and prepares real `/add` commands for the Telegram bot.</p>
+            <div class="filters" style="margin-top:10px">
+              <select id="watchlistCompetitor">
+                <option value="Deal Direct">Deal Direct</option>
+                <option value="Spray Gadget">Spray Gadget</option>
+                <option value="TAC Mobiles">TAC Mobiles</option>
+                <option value="Urban Republic">Urban Republic</option>
+                <option value="Our Store">Our Store</option>
+              </select>
+            </div>
+            <textarea id="watchlistLinksInput" placeholder="Paste Shopee links here, one per line"></textarea>
+            <div class="actions" style="margin-top:10px">
+              <button id="prepareWatchlistLinks" class="secondary">Prepare add commands</button>
+              <button id="copyWatchlistCommands">Copy add commands</button>
+            </div>
+            <div id="watchlistLinksResult" class="link-intake-result">Paste links above to prepare commands.</div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <span class="muted">Products</span>
+            <strong id="metricProducts">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Variant rows</span>
+            <strong id="metricVariants">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Shops</span>
+            <strong id="metricShops">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Latest capture</span>
+            <strong id="metricLatest" style="font-size:16px">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="report-wrap">
+        <h2 style="margin:0">Price drop report</h2>
+        <p class="muted" style="margin-top:6px">Compare the latest two captures for the same `shop_id + item_id + variant` and list the price drops.</p>
+        <div class="metrics">
+          <div class="metric">
+            <span class="muted">Dropped variants</span>
+            <strong id="metricDrops">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Largest drop</span>
+            <strong id="metricMaxDrop">-</strong>
+          </div>
+        </div>
+        <div id="dropList" class="report-list"></div>
+      </section>
+
+      <section class="table-wrap">
+        <div class="table-bar">
+          <div>
+            <h2>Captured product details</h2>
+            <p id="tableSummary">Use filters or a competitor button to inspect specific product rows.</p>
+          </div>
+          <button id="tableToggle" class="secondary table-toggle" type="button" aria-expanded="false">Show details</button>
+        </div>
+        <div id="tablePanel" class="table-panel" hidden>
+          <div class="filters">
+            <input id="searchInput" type="search" placeholder="Search product / shop / variant / ID">
+            <select id="shopFilter">
+              <option value="">All shops</option>
+            </select>
+            <select id="seriesFilter">
+              <option value="">All series</option>
+            </select>
+            <select id="modelFilter">
+              <option value="">All models</option>
+            </select>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Captured at</th>
+                <th>Product</th>
+                <th>Color</th>
+                <th>Capacity</th>
+                <th>Current price</th>
+                <th>Original price</th>
+                <th>Stock</th>
+                <th>Shop / IDs</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>window.D3_EMBEDDED_RECORDS = [
+  {
+    "schemaVersion": 1,
+    "grabbedAt": "2026-06-04T04:06:21.413Z",
+    "pageUrl": "https://shopee.com.my/Samsung-S26-(12-256GB-12-512GB)-6.7-2x-Amoled-Display-l-Exynos-2600-l-4300mAH-Battery-l-Galaxy-Al-i.77792787.49707960484?extraParams=%7B%22display_model_id%22%3A415704807108%2C%22model_selection_logic%22%3A3%7D&sp_atk=8dd9bab9-49e9-4b71-bc8b-3d7ee1270a20&xptdk=8dd9bab9-49e9-4b71-bc8b-3d7ee1270a20",
+    "shopId": "77792787",
+    "itemId": "49707960484",
+    "sellerName": "",
+    "title": "Samsung S26+ (12+256GB/ 12+512GB) 6.7\" 2x Amoled Display l Exynos 2600 l 4300mAH Battery l Galaxy Al",
+    "currency": "MYR",
+    "variants": [
+      {
+        "name": "12+512GB, Violet,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "grabbedAt": "2026-06-04T04:06:15.648Z",
+    "pageUrl": "https://shopee.com.my/Samsung-Galaxy-S26-Ultra(12-256GB-12-512GB-16-1TB)-6.9-2x-Amoled-Display-l-Snapdragon-8-Elite-Gen-5-l-Galaxy-Al-i.77792787.46607955850?extraParams=%7B%22display_model_id%22%3A208818523257%2C%22model_selection_logic%22%3A3%7D&sp_atk=05a08b78-61ca-42ce-af50-4d79fd73f137&xptdk=05a08b78-61ca-42ce-af50-4d79fd73f137",
+    "shopId": "77792787",
+    "itemId": "46607955850",
+    "sellerName": "",
+    "title": "Samsung Galaxy S26 Ultra(12+256GB/ 12+512GB/ 16+1TB) 6.9\" 2x Amoled Display l Snapdragon 8 Elite Gen 5 l Galaxy Al",
+    "currency": "MYR",
+    "variants": [
+      {
+        "name": "12+512GB, White,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Gift Set",
+        "currentPrice": 5899,
+        "originalPrice": 5899,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo",
+        "currentPrice": 5449,
+        "originalPrice": 5449,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo(Gift Set)",
+        "currentPrice": 5759,
+        "originalPrice": 5759,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Violet,Promo",
+        "currentPrice": 7179,
+        "originalPrice": 7179,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo(Gift Set)",
+        "currentPrice": 5759,
+        "originalPrice": 5759,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, White,Promo",
+        "currentPrice": 7179,
+        "originalPrice": 7179,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, White,Basic",
+        "currentPrice": 7799,
+        "originalPrice": 7799,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Basic",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Pink,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Blue,Basic",
+        "currentPrice": 7799,
+        "originalPrice": 7799,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Violet,Basic",
+        "currentPrice": 7799,
+        "originalPrice": 7799,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo",
+        "currentPrice": 5449,
+        "originalPrice": 5449,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo(Gift Set)",
+        "currentPrice": 5759,
+        "originalPrice": 5759,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Silver,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, White,Gift Set",
+        "currentPrice": 8099,
+        "originalPrice": 8099,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Silver,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Gift Set",
+        "currentPrice": 5899,
+        "originalPrice": 5899,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo(Gift Set)",
+        "currentPrice": 5759,
+        "originalPrice": 5759,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Black,Gift Set",
+        "currentPrice": 8099,
+        "originalPrice": 8099,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Black,Basic",
+        "currentPrice": 7799,
+        "originalPrice": 7799,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Basic",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Basic",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Black,Promo",
+        "currentPrice": 7179,
+        "originalPrice": 7179,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Silver,Basic",
+        "currentPrice": 6119,
+        "originalPrice": 6119,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Pink,Promo(Gift Set)",
+        "currentPrice": 6249,
+        "originalPrice": 6249,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Black,Promo(Gift Set)",
+        "currentPrice": 7479,
+        "originalPrice": 7479,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo",
+        "currentPrice": 5449,
+        "originalPrice": 5449,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo",
+        "currentPrice": 5449,
+        "originalPrice": 5449,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Blue,Promo",
+        "currentPrice": 7179,
+        "originalPrice": 7179,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Pink,Gift Set",
+        "currentPrice": 6399,
+        "originalPrice": 6399,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Violet,Gift Set",
+        "currentPrice": 8099,
+        "originalPrice": 8099,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Gift Set",
+        "currentPrice": 5899,
+        "originalPrice": 5899,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Silver,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Violet,Promo(Gift Set)",
+        "currentPrice": 7479,
+        "originalPrice": 7479,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, White,Promo(Gift Set)",
+        "currentPrice": 7479,
+        "originalPrice": 7479,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Basic",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Pink,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Blue,Gift Set",
+        "currentPrice": 8099,
+        "originalPrice": 8099,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "16+1TB, Blue,Promo(Gift Set)",
+        "currentPrice": 7479,
+        "originalPrice": 7479,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Gift Set",
+        "currentPrice": 5899,
+        "originalPrice": 5899,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Promo",
+        "currentPrice": 5939,
+        "originalPrice": 5939,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "grabbedAt": "2026-06-04T03:59:00.407Z",
+    "pageUrl": "https://shopee.com.my/Samsung-S26-(12-256GB-12-512GB)-6.7-2x-Amoled-Display-l-Exynos-2600-l-4300mAH-Battery-l-Galaxy-Al-i.77792787.49707960484?extraParams=%7B%22display_model_id%22%3A415704807108%2C%22model_selection_logic%22%3A3%7D&sp_atk=d1bc3a90-8ac3-4ebe-bc96-165906e02aa0&xptdk=d1bc3a90-8ac3-4ebe-bc96-165906e02aa0",
+    "shopId": "77792787",
+    "itemId": "49707960484",
+    "sellerName": "",
+    "title": "Samsung S26+ (12+256GB/ 12+512GB) 6.7\" 2x Amoled Display l Exynos 2600 l 4300mAH Battery l Galaxy Al",
+    "currency": "MYR",
+    "variants": [
+      {
+        "name": "12+512GB, Black,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Violet,Basic",
+        "currentPrice": 5379,
+        "originalPrice": 5379,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Black,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo",
+        "currentPrice": 5139,
+        "originalPrice": 5139,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Blue,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, White,Promo",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Blue,Gift Set",
+        "currentPrice": 5599,
+        "originalPrice": 5599,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Promo(Gift Set)",
+        "currentPrice": 5459,
+        "originalPrice": 5459,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Promo(Gift Set)",
+        "currentPrice": 5579,
+        "originalPrice": 5579,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+512GB, Black,Gift Set",
+        "currentPrice": 5699,
+        "originalPrice": 5699,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, White,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      },
+      {
+        "name": "12+256GB, Violet,Basic",
+        "currentPrice": 5259,
+        "originalPrice": 5259,
+        "promoPrice": null,
+        "stock": null,
+        "inStock": true
+      }
+    ]
+  }
+]
+;</script>
+    <script>/*ITEMMAP_START*/window.D3_ITEM_MODEL = {"1897996622":"A17 LTE","1998448434":"A06/A07/A17 Mixed","2040352813":"A06/A07/A17 Mixed","2071903816":"Buds Mixed","2854530763":"A07/A26/A36/A56 Mixed","3345960282":"Watch 8 Classic / Watch 8 Mixed","53958321553":"S26","40179555984":"A57 5G","23535708035":"A06 5G","18050756854":"A07 LTE","24605809107":"A07 5G","20650403967":"A17 5G","24655812966":"A37 5G","18477388510":"A56 5G","19046032907":"A57 5G","23521617323":"S25 5G","25709109170":"S26 5G","26905026841":"Z Fold 7","18247426966":"Tab A11 WiFi","45404515124":"Tab S10 FE","24778041689":"Tab S10 Lite","25786823660":"Tab S11","24838519383":"Buds 3 FE","28655233706":"Buds 4","19273412472":"Watch 8","28659330574":"A06 5G","41265702285":"A07 5G","26990633665":"A17 5G","41918781774":"A17 LTE","54857330691":"A37 5G","26029531554":"A56 5G","48807339610":"A57 5G","27024449954":"S25 Ultra","43568342488":"S25 FE","29524548527":"S25 5G","25490829302":"S25","25190798595":"S25 Ultra","46607955850":"S26 Ultra","52257929820":"S26","49707960484":"S26","42157985428":"Z Flip 7","40457972905":"Z Fold 7","43972190362":"Tab A11","29941795528":"Tab S10 Lite","24744928642":"Tab S10 FE","29685946293":"Tab S10 FE","27163304333":"Tab S10 Ultra","41519990686":"Tab S11 Ultra","29307088298":"Buds 3","24078912868":"Fit 3","40708460999":"Watch 8","44259315461":"Watch Ultra","42815512535":"A07/A17 Mixed","8133737389":"A56/A36/A26 Mixed","53507832936":"A57/A37 Mixed","25141035334":"S25/S25+/S25 Ultra Mixed","49656562320":"S26","46456553952":"S26+","43228940960":"S26 Ultra","7552117561":"Z Fold 7 / Z Flip 7 Mixed","41172453915":"Tab A11","48354584857":"Tab A11 Mixed","5646425261":"Tab S10 Ultra / S10 / S10 FE Mixed","40168047933":"Tab S10 Lite","43318801934":"Tab S11 Ultra / S11 Mixed","5556795956":"Buds Mixed","6358202083":"Fit 3","9812470630":"Watch Ultra / Watch 8 / Watch 8 Classic Mixed","7518158459":"A06/A07/A17 Mixed","12883548051":"A07/A17/A26/A36/A56 Mixed","5276526599":"S25/S25 Ultra/S25 FE Mixed","13776084190":"S25/S25 Ultra Mixed","8510202234":"Our Store Listing","27874385975":"S25/S25 Ultra Mixed","44218340501":"Our Store Listing","26213162757":"S25 FE/S24 FE Mixed","9310202625":"S26 Ultra/S26 Mixed","44956587639":"S26 Ultra/S26 Mixed","47658056302":"S26 Ultra/S26 Mixed","57706241084":"S26 Ultra/S26 Mixed","45506590424":"S26 5G","54156570393":"S26 5G","29905064658":"Z Flip 7 / Flip 7 FE","42007977847":"Z Flip 7 / Flip 7 FE","29455129269":"Z Fold 7","44057977076":"Z Fold 7","11613855795":"Tab A11 Mixed","4934872394":"Tab A11 Mixed","7300195418":"Tab S10 Lite / S10 FE Mixed","7347452888":"Tab S11 Ultra / S11 / S10 Ultra / S10 Mixed","13376142675":"Tab S10 FE","7147452785":"Tab S11 Ultra / S11 / S10 Ultra / S10 Mixed","22575577652":"Our Store Listing","27336292487":"Tab S10 FE","41570233341":"Our Store Listing","24636746049":"Our Store Listing","42970558023":"Tab S11 Mixed","6218407214":"Buds Mixed","29155326353":"Buds Mixed","42970255011":"Buds Mixed","4563335547":"Fit 3","10335851509":"Watch Ultra / Watch 8 Classic / Watch 8 Mixed","5901074412":"Watch 8","5001081545":"Watch 8 Classic / Watch 8 Mixed","26755317959":"Watch 8 Classic / Watch 8 Mixed","43208224943":"Watch Ultra / Watch 8 Classic / Watch 8 Mixed","19533340383":"Watch Ultra 2025"};window.D3_WATCHLIST = [{"shopId":"54618012","itemId":"53958321553","competitor":"Our Store","ourProduct":"Samsung Galaxy S26","productUrl":"https://shopee.com.my/-NEW-ARRIVAL-Samsung-Galaxy-S26-5G-100-Original-Malaysia-New-Set-i.54618012.53958321553?extraParams=%7B%22display_model_id%22%3A410738726921%2C%22model_selection_logic%22%3A3%7D&sp_atk=823f069f-88b7-4ba2-a0c4-9081ea23759f&xptdk=823f069f-88b7-4ba2-a0c4-9081ea23759f"},{"shopId":"56447030","itemId":"40179555984","competitor":"Urban Republic","ourProduct":"Samsung Galaxy A57 5G","productUrl":"https://shopee.com.my/-UR-Samsung-Galaxy-A57-5G-(12GB-256GB-12GB-512GB)-i.56447030.40179555984?extraParams=%7B%22display_model_id%22%3A430690879226%2C%22model_selection_logic%22%3A3%7D"},{"shopId":"116917349","itemId":"23535708035","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A06 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A06-5G-(A066)-6-128GB-Samsung-Malaysia-Warranty-i.116917349.23535708035?extraParams=%7B%22display_model_id%22%3A59288179742%2C%22model_selection_logic%22%3A3%7D&sp_atk=b7a9ec2f-06ed-49a4-a8ff-a44368a4890f&xptdk=b7a9ec2f-06ed-49a4-a8ff-a44368a4890f"},{"shopId":"116917349","itemId":"18050756854","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A07 LTE","productUrl":"https://shopee.com.my/Samsung-Galaxy-A07-LTE-4G-(8-256GB)-Samsung-Malaysia-Warranty-Smartphone-i.116917349.18050756854?extraParams=%7B%22display_model_id%22%3A306507427686%2C%22model_selection_logic%22%3A3%7D&sp_atk=3fcfe2e2-e68c-43eb-9a9f-0eaf0b027002&xptdk=3fcfe2e2-e68c-43eb-9a9f-0eaf0b027002"},{"shopId":"116917349","itemId":"24605809107","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A07 5G","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-A07-5G-(8GB-RAM-256GB-ROM)-Samsung-Malaysia-Warranty-i.116917349.24605809107?extraParams=%7B%22display_model_id%22%3A325484376380%2C%22model_selection_logic%22%3A3%7D&sp_atk=883097c1-5e1c-46c1-a9f8-fd0db77dff5f&xptdk=883097c1-5e1c-46c1-a9f8-fd0db77dff5f"},{"shopId":"116917349","itemId":"20650403967","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A17 5G","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-A17-5G-(8GB-RAM-256GB-ROM)-Samsung-Malaysia-Warranty-i.116917349.20650403967?extraParams=%7B%22display_model_id%22%3A286509208712%2C%22model_selection_logic%22%3A3%7D&sp_atk=25e27657-dd6a-4910-bde0-83fc0fa5dc9e&xptdk=25e27657-dd6a-4910-bde0-83fc0fa5dc9e"},{"shopId":"116917349","itemId":"1897996622","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A17 LTE","productUrl":"https://shopee.com.my/Samsung-Galaxy-A17-LTE-(8-256GB)-Samsung-Malaysia-Warranty-i.116917349.1897996622?extraParams=%7B%22display_model_id%22%3A231448267708%2C%22model_selection_logic%22%3A3%7D&sp_atk=f15f2a8d-f77c-487b-b340-65269a88e59c&xptdk=f15f2a8d-f77c-487b-b340-65269a88e59c"},{"shopId":"116917349","itemId":"24655812966","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A37 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A37-5G-(8-256GB-12-256GB)-Samsung-Malaysia-Warranty-i.116917349.24655812966?extraParams=%7B%22display_model_id%22%3A400695971313%2C%22model_selection_logic%22%3A3%7D&sp_atk=c927cb5e-a6b7-4bb7-8f34-a9a62a646450&xptdk=c927cb5e-a6b7-4bb7-8f34-a9a62a646450"},{"shopId":"116917349","itemId":"18477388510","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A56 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A56-5G-12GB-RAM-256GB-RM-Original-Samsung-Malaysia-Warranty-i.116917349.18477388510?extraParams=%7B%22display_model_id%22%3A262552748060%2C%22model_selection_logic%22%3A3%7D&sp_atk=30a29a39-a8f4-4e93-99b7-f74cebe880e6&xptdk=30a29a39-a8f4-4e93-99b7-f74cebe880e6"},{"shopId":"116917349","itemId":"19046032907","competitor":"Deal Direct","ourProduct":"Samsung Galaxy A57 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A57-5G-(12-256GB-12-512GB)-Samsung-Malaysia-Warranty-i.116917349.19046032907?extraParams=%7B%22display_model_id%22%3A400696052973%2C%22model_selection_logic%22%3A3%7D&sp_atk=574a3124-87b1-4f9d-944f-b1ef9ec884e7&xptdk=574a3124-87b1-4f9d-944f-b1ef9ec884e7"},{"shopId":"116917349","itemId":"23521617323","competitor":"Deal Direct","ourProduct":"Samsung Galaxy S25 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-5G-S25-5G-S25-Ultra-5G-Original-Malaysia-Set-1-Year-Warranty-i.116917349.23521617323?extraParams=%7B%22display_model_id%22%3A330868048460%2C%22model_selection_logic%22%3A3%7D&sp_atk=d9bfec96-d745-4e02-8bc1-82f6b7440bb3&xptdk=d9bfec96-d745-4e02-8bc1-82f6b7440bb3"},{"shopId":"116917349","itemId":"25709109170","competitor":"Deal Direct","ourProduct":"Samsung Galaxy S26 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-5G-S26-5G-S26-Ultra-5G-Samsung-Malaysia-Warranty-i.116917349.25709109170?extraParams=%7B%22display_model_id%22%3A249174547783%2C%22model_selection_logic%22%3A3%7D&sp_atk=34af0f98-0c4b-4640-9477-fbcba554a3c4&xptdk=34af0f98-0c4b-4640-9477-fbcba554a3c4"},{"shopId":"116917349","itemId":"26905026841","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Z Fold 7","productUrl":"https://shopee.com.my/Samsung-Galaxy-Z-Fold-7-5G-(12GB-256GB-512GB-1TB-)-Smartphone-Samsung-Malaysia-Warranty-i.116917349.26905026841?extraParams=%7B%22display_model_id%22%3A306049578422%2C%22model_selection_logic%22%3A3%7D&sp_atk=d871cf4a-5ac7-4723-97fb-eb2dc0769692&xptdk=d871cf4a-5ac7-4723-97fb-eb2dc0769692"},{"shopId":"116917349","itemId":"18247426966","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Tab A11 WiFi","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-A11-WiFi-(6-128GB)-Samsung-Malaysia-Set-i.116917349.18247426966?extraParams=%7B%22display_model_id%22%3A282484796963%2C%22model_selection_logic%22%3A3%7D&sp_atk=3e723536-0dfa-4f46-a37c-e5f9c156a342&xptdk=3e723536-0dfa-4f46-a37c-e5f9c156a342"},{"shopId":"116917349","itemId":"45404515124","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Tab S10 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-FE-Tab-S10-FE-(12GB-256GB)-WiFi-Samsung-Malaysia-Warranty-i.116917349.45404515124?extraParams=%7B%22display_model_id%22%3A375942209858%2C%22model_selection_logic%22%3A3%7D&sp_atk=fb1b5733-9ae3-4ef3-b2c4-312903f94e52&xptdk=fb1b5733-9ae3-4ef3-b2c4-312903f94e52"},{"shopId":"116917349","itemId":"24778041689","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Tab S10 Lite","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-Lite-WiFi-X400-10.9-Tablet-(6GB-128GB)-Samsung-Malaysia-Warranty-i.116917349.24778041689?extraParams=%7B%22display_model_id%22%3A370525138417%2C%22model_selection_logic%22%3A3%7D&sp_atk=e211a2ad-dc77-4bf7-8a07-4733a1717194&xptdk=e211a2ad-dc77-4bf7-8a07-4733a1717194"},{"shopId":"116917349","itemId":"25786823660","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Tab S11","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S11-S11-Ultra-WiFi-Samsung-Malaysia-Warranty-i.116917349.25786823660?extraParams=%7B%22display_model_id%22%3A276690261279%2C%22model_selection_logic%22%3A3%7D&sp_atk=c8eaf295-5ef2-4584-9fce-e6f4fe842f8f&xptdk=c8eaf295-5ef2-4584-9fce-e6f4fe842f8f"},{"shopId":"116917349","itemId":"24838519383","competitor":"Deal Direct","ourProduct":"Samsung Buds 3 FE","productUrl":"https://shopee.com.my/Samsung-Buds-3-FE-Bluetooth-In-ear-Earphone-Earbuds-Samsung-Malaysia-Warranty-i.116917349.24838519383?extraParams=%7B%22display_model_id%22%3A385688747748%2C%22model_selection_logic%22%3A3%7D&sp_atk=36617415-cac3-47d5-963b-5d794eb77ae8&xptdk=36617415-cac3-47d5-963b-5d794eb77ae8"},{"shopId":"116917349","itemId":"28655233706","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Buds 4","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-Buds-4-Buds-4-Pro-Wireless-Bluetooth-Earbuds-i.116917349.28655233706?extraParams=%7B%22display_model_id%22%3A385597540627%2C%22model_selection_logic%22%3A3%7D&sp_atk=eea68cc4-0b45-48d6-94f2-53340d29bf49&xptdk=eea68cc4-0b45-48d6-94f2-53340d29bf49"},{"shopId":"116917349","itemId":"19273412472","competitor":"Deal Direct","ourProduct":"Samsung Galaxy Watch 8","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-8-Watch-8-Classic-Watch-Ultra-2025-Original-Malaysia-New-Set-i.116917349.19273412472?extraParams=%7B%22display_model_id%22%3A410943162772%2C%22model_selection_logic%22%3A3%7D&sp_atk=d9f9098d-9ba8-4ddc-a01e-fab11ec08335&xptdk=d9f9098d-9ba8-4ddc-a01e-fab11ec08335"},{"shopId":"77792787","itemId":"28659330574","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A06 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A06-5G-Galaxy-A06-4G-l-6.7'-HD-Display-l-5000mAH-Battery%F0%9F%8E%81Samsung-Malaysia-Warranty-i.77792787.28659330574"},{"shopId":"77792787","itemId":"41265702285","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A07 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A07-5G-LTE-(8-256GB)-6.7-IPS-Display-l-P54-Water-Resistance-%F0%9F%8E%81Samsung-Malaysia-Warranty-i.77792787.41265702285"},{"shopId":"77792787","itemId":"26990633665","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A17 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A17-5G-LTE-(8GB-256GB)-6.7-Super-Amoled-Display-l-NFC-l-IP54-Water-Resistance-%F0%9F%8E%81Samsung-Malaysia-Warranty-i.77792787.26990633665"},{"shopId":"77792787","itemId":"41918781774","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A17 LTE","productUrl":"https://shopee.com.my/Samsung-Galaxy-A17-LTE-(8GB-256GB)-6.7-Super-Amoled-Display-l-NFC-l-IP54-Water-Resistance-%F0%9F%8E%81Samsung-Malaysia-Warranty-i.77792787.41918781774"},{"shopId":"77792787","itemId":"54857330691","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A37 5G","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-A37-5G-(8-256GB-12-256GB)-6.7-FHD-Super-Amoled-l-Enhanced-Al-l-45W-Fast-Charge-i.77792787.54857330691"},{"shopId":"77792787","itemId":"26029531554","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A56 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-A56-5G-(12GB-256GB)Awesome-Intelligence-l-45W-Fast-Charge-%F0%9F%8E%81Samsung-Malaysia-Warranty-i.77792787.26029531554"},{"shopId":"77792787","itemId":"48807339610","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy A57 5G","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-A57-5G-(12-256GB-12-512GB)-6.7-FHD-Super-Amoled-l-Enhanced-Al-l-45W-Fast-Charge-i.77792787.48807339610"},{"shopId":"77792787","itemId":"27024449954","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S25 Ultra","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-S25-Ultra-(12-256GB-12-512GB-12GB-1TB)-Galaxy-Al-Snapdragon-8-Elite-i.77792787.27024449954"},{"shopId":"77792787","itemId":"43568342488","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S25 FE","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-S25-FE-5G-(8-256GB-8-512GB)-i.77792787.43568342488"},{"shopId":"77792787","itemId":"29524548527","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S25 5G","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-S25-5G-(12-256GB-12-512GB)-i.77792787.29524548527"},{"shopId":"77792787","itemId":"25490829302","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S25","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-S25-(12-256GB-12-512GB)-i.77792787.25490829302"},{"shopId":"77792787","itemId":"25190798595","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S25 Ultra","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-Ultra-5G-Galaxy-S25-5G-Galaxy-S25-5G-i.77792787.25190798595"},{"shopId":"77792787","itemId":"46607955850","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S26 Ultra","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-Ultra(12-256GB-12-512GB-16-1TB)-i.77792787.46607955850"},{"shopId":"77792787","itemId":"52257929820","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S26","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-(12-256GB-12-512GB)-6.3-i.77792787.52257929820"},{"shopId":"77792787","itemId":"49707960484","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy S26","productUrl":"https://shopee.com.my/Samsung-S26-(12-256GB-12-512GB)-6.7-i.77792787.49707960484"},{"shopId":"77792787","itemId":"42157985428","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Z Flip 7","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-Z-Flip-7-5G-Z-Flip-7-FE-5G-(12-256GB-12-512GB)-i.77792787.42157985428"},{"shopId":"77792787","itemId":"40457972905","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Z Fold 7","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-Z-Fold-7-5G-(12-256GB-12-512GB-16-1TB)-i.77792787.40457972905"},{"shopId":"77792787","itemId":"43972190362","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab A11","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-Tab-A11-Galaxy-A11-(4-64GB-l-8-128GB)-WiFi-l-LTE-i.77792787.43972190362"},{"shopId":"77792787","itemId":"29941795528","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab S10 Lite","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-Lite-(SM-X400)-(6GB-RAM-128GB-ROM)-i.77792787.29941795528"},{"shopId":"77792787","itemId":"24744928642","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab S10 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-FE-(SM-X520)-(12GB-256GB)-i.77792787.24744928642"},{"shopId":"77792787","itemId":"29685946293","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab S10 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-FE-(SM-X620)-(12GB-256GB)-i.77792787.29685946293"},{"shopId":"77792787","itemId":"27163304333","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab S10 Ultra","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-Ultra-Galaxy-Tab-S10-(12-256GB)-i.77792787.27163304333"},{"shopId":"77792787","itemId":"41519990686","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Tab S11 Ultra","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S11-Ultra-Galaxy-Tab-S11-WIFI-i.77792787.41519990686"},{"shopId":"77792787","itemId":"29307088298","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Buds 3","productUrl":"https://shopee.com.my/SAMSUNG-Galaxy-Buds-3-Buds-3-Pro-i.77792787.29307088298"},{"shopId":"77792787","itemId":"24078912868","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Fit 3","productUrl":"https://shopee.com.my/Samsung-Galaxy-Fit-3-Smart-Watch-i.77792787.24078912868"},{"shopId":"77792787","itemId":"40708460999","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Watch 8","productUrl":"https://shopee.com.my/-NEW-Samsung-Galaxy-Watch-8-Classic-Watch-Ultra-2025-i.77792787.40708460999"},{"shopId":"77792787","itemId":"44259315461","competitor":"Spray Gadget","ourProduct":"Samsung Galaxy Watch Ultra","productUrl":"https://shopee.com.my/-PROMO-SAMSUNG-Galaxy-Watch-Ultra-LTE-47mm-i.77792787.44259315461"},{"shopId":"271823454","itemId":"42815512535","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy A07/A17 Mixed","productUrl":"https://shopee.com.my/(Ready-Stock)-SAMSUNG-GALAXY-A07-SAMSUNG-GALAXY-A17-5G-SAMSUNG-A17-4G-100-ORIGINAL-SAMSUNG-MALAYSIA-i.271823454.42815512535"},{"shopId":"271823454","itemId":"8133737389","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy A56/A36/A26 Mixed","productUrl":"https://shopee.com.my/SAMSUNG-GALAXY-A56-5G-GALAXY-A36-5G-GALAXY-A26-5G-100-ORIGINAL-BY-SAMSUNG-MALAYSIA-i.271823454.8133737389"},{"shopId":"271823454","itemId":"53507832936","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy A57/A37 Mixed","productUrl":"https://shopee.com.my/(READY-STOCK-TO-SHIP)-SAMSUNG-GALAXY-A57-5G-SAMSUNG-GALAXY-A37-5G-100-ORIGINAL-SAMUNG-MALAYSIA-i.271823454.53507832936"},{"shopId":"271823454","itemId":"25141035334","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy S25/S25+/S25 Ultra Mixed","productUrl":"https://shopee.com.my/(Ready-Stock-)SAMSUNG-GALAXY-S25-ULTRA-5G-SAMSUNG-GALAXY-S25-PLUS-5G-SAMSUNG-S25-5G-100-ORIGINAL-SAMSUNG-MALAYSIA-i.271823454.25141035334"},{"shopId":"271823454","itemId":"49656562320","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy S26","productUrl":"https://shopee.com.my/SAMSUNG-GALAXY-S26-512GB-256GB-100-ORIGINAL-SAMSUNG-MALAYSIA-SET-i.271823454.49656562320"},{"shopId":"271823454","itemId":"46456553952","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy S26+","productUrl":"https://shopee.com.my/SAMSUNG-GALAXY-S26-PLUS-512GB-256GB-100-ORIGINAL-SAMSUNG-MALAYSIA-SET-i.271823454.46456553952"},{"shopId":"271823454","itemId":"43228940960","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy S26 Ultra","productUrl":"https://shopee.com.my/SAMSUNG-GALAXY-S26-ULTRA-1TB-512GB-256GB-100-ORIGINAL-SAMSUNG-MALAYSIA-i.271823454.43228940960"},{"shopId":"271823454","itemId":"7552117561","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Z Fold 7 / Z Flip 7 Mixed","productUrl":"https://shopee.com.my/(Ready-Stock)-SAMSUNG-Z-FOLD7-5G-SAMSUNG-Z-FLIP7-5G-100-Original-SAMSUNG-MALAYSIA-i.271823454.7552117561"},{"shopId":"271823454","itemId":"41172453915","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Tab A11","productUrl":"https://shopee.com.my/(READY-STOCK-TO-SHIP)-SAMSUNG-GALAXY-TAB-A11-100-ORGINAL-SAMSUNG-MALAYSIA-i.271823454.41172453915"},{"shopId":"271823454","itemId":"48354584857","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Tab A11 Mixed","productUrl":"https://shopee.com.my/(Ready-Stock-to-ship)-SAMSUNG-TAB-A11-WIFI-SAMSUNG-TAB-A11-PLUS-WIFI-6-128GB-ORIGINAL-SAMSUNG-MALAYSIA-SET-i.271823454.48354584857"},{"shopId":"271823454","itemId":"5646425261","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Tab S10 Ultra / S10 / S10 FE Mixed","productUrl":"https://shopee.com.my/SAMSUNG-GALAXY-TAB-S10-ULTRA-SAMSUNG-TAB-S10-TAB-S10FE-TAB-S10FE-PLUS%F0%9F%8E%81100-ORIGINAL-SAMSUNG-Malaysia-i.271823454.5646425261"},{"shopId":"271823454","itemId":"40168047933","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Tab S10 Lite","productUrl":"https://shopee.com.my/(READY-STOCK-TO-SHIP)-SAMSUNG-TAB-S10-LITE-6-128GB-100-ORIGINAL-SAMSUNG-MALAYSIA-SET-i.271823454.40168047933"},{"shopId":"271823454","itemId":"43318801934","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Tab S11 Ultra / S11 Mixed","productUrl":"https://shopee.com.my/(Ready-Stock-to-ship)-GALAXY-TAB-S11-ULTRA-WIFI-12-512GB-TAB-S11-5G-WIFI-12-256GB-100-ORIGINAL-SAMSUNG-MALAYSIA-i.271823454.43318801934"},{"shopId":"271823454","itemId":"5556795956","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Buds Mixed","productUrl":"https://shopee.com.my/SAMSUNG-BUDS4-PRO-BUDS-4-BUDS-3-BUDS3-FE-BUDS-CORE-100-ORIGINAL-WARRANTY-BY-SAMSUNG-MALAYSIA-i.271823454.5556795956"},{"shopId":"271823454","itemId":"6358202083","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Fit 3","productUrl":"https://shopee.com.my/(Ready-Stock)-NEW-SAMSUNG-FIT3-%F0%9F%92%A5-100-Original-WARRANTY-BY-SAMSUNG-MALAYSIA-i.271823454.6358202083"},{"shopId":"271823454","itemId":"9812470630","competitor":"TAC Mobiles","ourProduct":"Samsung Galaxy Watch Ultra / Watch 8 / Watch 8 Classic Mixed","productUrl":"https://shopee.com.my/(READY-STOCK)-SAMSUNG-ULTRA-SAMSUNG-WATCH7-SAMSUNG-WATCH8-CLASSIC-SAMSUNG-WATCH6-100-ORIGINAL-SAMSUNG-MALAYSIA-i.271823454.9812470630"},{"shopId":"54618012","itemId":"1998448434","competitor":"Our Store","ourProduct":"Samsung Galaxy A06/A07/A17 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-A06-A07-A17-4G-5G-A26-A36-A56-5G-1-Year-Samsung-Warranty-i.54618012.1998448434?extraParams=%7B%22display_model_id%22%3A302581411083%2C%22model_selection_logic%22%3A3%7D&sp_atk=e100025a-6a5c-4167-b757-f770082ebc2e&xptdk=e100025a-6a5c-4167-b757-f770082ebc2e"},{"shopId":"54618012","itemId":"2040352813","competitor":"Our Store","ourProduct":"Samsung Galaxy A06/A07/A17 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-A17-A07-A06-4G-5G-Original-Malaysia-Set-i.54618012.2040352813?extraParams=%7B%22display_model_id%22%3A360859497640%2C%22model_selection_logic%22%3A3%7D&sp_atk=cba5e0a2-aee7-4541-9552-174bdbeabfee&xptdk=cba5e0a2-aee7-4541-9552-174bdbeabfee"},{"shopId":"54618012","itemId":"7518158459","competitor":"Our Store","ourProduct":"Samsung Galaxy A06/A07/A17 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-A56-A36-A26-A17-A07-A06-4G-5G-Original-Malaysia-New-Set-i.54618012.7518158459?extraParams=%7B%22display_model_id%22%3A370856272576%2C%22model_selection_logic%22%3A3%7D&sp_atk=a63ecfc8-7093-401b-a017-a1c018b1986d&xptdk=a63ecfc8-7093-401b-a017-a1c018b1986d"},{"shopId":"54618012","itemId":"12883548051","competitor":"Our Store","ourProduct":"Samsung Galaxy A07/A17/A26/A36/A56 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-A07-A17-A26-A36-A56-5G-Original-New-Set-1-Year-Warranty-i.54618012.12883548051?extraParams=%7B%22display_model_id%22%3A315486235051%2C%22model_selection_logic%22%3A3%7D&sp_atk=0934ee8a-91a3-4b15-b591-5d5293c1370b&xptdk=0934ee8a-91a3-4b15-b591-5d5293c1370b"},{"shopId":"54618012","itemId":"2854530763","competitor":"Our Store","ourProduct":"Samsung Galaxy A07/A26/A36/A56 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-A07-4G-5G-A26-A36-A56-5G-Original-Malaysia-New-Set-i.54618012.2854530763?extraParams=%7B%22display_model_id%22%3A307364227761%2C%22model_selection_logic%22%3A3%7D&sp_atk=6505afbe-6e96-4091-9063-0324649825be&xptdk=6505afbe-6e96-4091-9063-0324649825be"},{"shopId":"54618012","itemId":"5276526599","competitor":"Our Store","ourProduct":"Samsung Galaxy S25/S25 Ultra/S25 FE Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-Galaxy-S25-Galaxy-S25-Ultra-Galaxy-S25-FE-5G-Original-Malaysia-New-Set-i.54618012.5276526599?extraParams=%7B%22display_model_id%22%3A301873904005%2C%22model_selection_logic%22%3A3%7D&sp_atk=8302aaae-1bb1-421f-8a2d-1251f51f5b7c&xptdk=8302aaae-1bb1-421f-8a2d-1251f51f5b7c"},{"shopId":"54618012","itemId":"13776084190","competitor":"Our Store","ourProduct":"Samsung Galaxy S25/S25 Ultra Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-Ultra-5G-Original-Malaysia-New-Set-i.54618012.13776084190?extraParams=%7B%22display_model_id%22%3A157707284002%2C%22model_selection_logic%22%3A3%7D&sp_atk=bcd7a18c-aef6-46b4-b44f-0799b08ef4cf&xptdk=bcd7a18c-aef6-46b4-b44f-0799b08ef4cf"},{"shopId":"54618012","itemId":"8510202234","competitor":"Our Store","ourProduct":"Our Store Listing","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-FE-5G-(8GB-256GB-8GB-512GB)-Original-Malaysia-New-Set-i.54618012.8510202234?extraParams=%7B%22display_model_id%22%3A291847905105%2C%22model_selection_logic%22%3A3%7D&sp_atk=658b98e7-938c-44a3-9a49-8cfc59959794&xptdk=658b98e7-938c-44a3-9a49-8cfc59959794"},{"shopId":"54618012","itemId":"27874385975","competitor":"Our Store","ourProduct":"Samsung Galaxy S25/S25 Ultra Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-Galaxy-S25-Galaxy-S25-Ultra-Original-Malaysia-New-Set-i.54618012.27874385975?extraParams=%7B%22display_model_id%22%3A252536636016%2C%22model_selection_logic%22%3A3%7D&sp_atk=132e787a-79d5-490a-889b-edf4fc264c56&xptdk=132e787a-79d5-490a-889b-edf4fc264c56"},{"shopId":"54618012","itemId":"44218340501","competitor":"Our Store","ourProduct":"Our Store Listing","productUrl":"https://shopee.com.my/-Ready-Stock-Samsung-Galaxy-S25-FE-5G-(8GB-256GB-8GB-512GB)-Original-Malaysia-New-Set-i.54618012.44218340501?extraParams=%7B%22display_model_id%22%3A306506466358%2C%22model_selection_logic%22%3A3%7D&sp_atk=a4ac5f1f-d074-4c5a-a07d-0bf878325b9d&xptdk=a4ac5f1f-d074-4c5a-a07d-0bf878325b9d"},{"shopId":"54618012","itemId":"26213162757","competitor":"Our Store","ourProduct":"Samsung Galaxy S25 FE/S24 FE Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S25-FE-S24-FE-5G-(8GB-256GB-8GB-512GB)-Original-Malaysia-New-Set-i.54618012.26213162757?extraParams=%7B%22display_model_id%22%3A291435139368%2C%22model_selection_logic%22%3A3%7D&sp_atk=8204d264-31ff-4790-9781-88f81e8b79b2&xptdk=8204d264-31ff-4790-9781-88f81e8b79b2"},{"shopId":"54618012","itemId":"9310202625","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 Ultra/S26 Mixed","productUrl":"https://shopee.com.my/-NEW-ARRIVAL-Samsung-Galaxy-S26-Ultra-S26-S26-5G-Original-Malaysia-New-Set-1-Year-Warranty-i.54618012.9310202625?extraParams=%7B%22display_model_id%22%3A350815699032%2C%22model_selection_logic%22%3A3%7D&sp_atk=9f92196b-be1b-41ac-ad06-669c64a6d4d6&xptdk=9f92196b-be1b-41ac-ad06-669c64a6d4d6"},{"shopId":"54618012","itemId":"44956587639","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 Ultra/S26 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-Ultra-5G-Original-Malaysia-New-Set-i.54618012.44956587639?extraParams=%7B%22display_model_id%22%3A335692836770%2C%22model_selection_logic%22%3A3%7D&sp_atk=c2f932c6-30ec-4f5b-8908-ffd7c456d5ab&xptdk=c2f932c6-30ec-4f5b-8908-ffd7c456d5ab"},{"shopId":"54618012","itemId":"47658056302","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 Ultra/S26 Mixed","productUrl":"https://shopee.com.my/-NEW-ARRIVAL-Samsung-Galaxy-S26-Ultra-5G-Original-Malaysia-New-Set-i.54618012.47658056302?extraParams=%7B%22display_model_id%22%3A410713854367%2C%22model_selection_logic%22%3A3%7D&sp_atk=81497dc3-1138-4e8d-967c-12426eef3817&xptdk=81497dc3-1138-4e8d-967c-12426eef3817"},{"shopId":"54618012","itemId":"57706241084","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 Ultra/S26 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-Ultra-Galaxy-S26-Galaxy-S26-5G-Original-Malaysia-New-Set-i.54618012.57706241084?extraParams=%7B%22display_model_id%22%3A370692830040%2C%22model_selection_logic%22%3A3%7D&sp_atk=6d52b55d-60d8-4c5c-a9ca-7cf43401a58b&xptdk=6d52b55d-60d8-4c5c-a9ca-7cf43401a58b"},{"shopId":"54618012","itemId":"45506590424","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 5G","productUrl":"https://shopee.com.my/Samsung-Galaxy-S26-5G-100-Original-Malaysia-New-Set-i.54618012.45506590424?extraParams=%7B%22display_model_id%22%3A390692776077%2C%22model_selection_logic%22%3A3%7D&sp_atk=f2e266af-62bb-4185-be7a-4faeaefd56e2&xptdk=f2e266af-62bb-4185-be7a-4faeaefd56e2"},{"shopId":"54618012","itemId":"54156570393","competitor":"Our Store","ourProduct":"Samsung Galaxy S26 5G","productUrl":"https://shopee.com.my/-NEW-ARRIVAL-Samsung-Galaxy-S26-5G-Original-Malaysia-New-Set-i.54618012.54156570393?extraParams=%7B%22display_model_id%22%3A365692969566%2C%22model_selection_logic%22%3A3%7D&sp_atk=6b3058be-0a24-49fe-b0d9-86e3039f4a0d&xptdk=6b3058be-0a24-49fe-b0d9-86e3039f4a0d"},{"shopId":"54618012","itemId":"29905064658","competitor":"Our Store","ourProduct":"Samsung Galaxy Z Flip 7 / Flip 7 FE","productUrl":"https://shopee.com.my/-READY-STOCK-Samsung-Galaxy-Z-Flip-7-Flip-7-FE-5G-12GB-256-512GB-Original-Malaysia-New-Set-i.54618012.29905064658?extraParams=%7B%22display_model_id%22%3A275925362908%2C%22model_selection_logic%22%3A3%7D&sp_atk=00717743-473c-46ce-bc81-76daff5c7850&xptdk=00717743-473c-46ce-bc81-76daff5c7850"},{"shopId":"54618012","itemId":"42007977847","competitor":"Our Store","ourProduct":"Samsung Galaxy Z Flip 7 / Flip 7 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Z-Flip-7-Flip-7-FE-5G-12GB-256-512GB-Original-Malaysia-New-Set-i.54618012.42007977847?extraParams=%7B%22display_model_id%22%3A99204879405%2C%22model_selection_logic%22%3A3%7D&sp_atk=e52ee0ac-f61c-45ce-b774-799692cbda06&xptdk=e52ee0ac-f61c-45ce-b774-799692cbda06"},{"shopId":"54618012","itemId":"29455129269","competitor":"Our Store","ourProduct":"Samsung Galaxy Z Fold 7","productUrl":"https://shopee.com.my/-READY-STOCK-Samsung-Galaxy-Z-Fold-7-5G-12GB-256GB-12GB-512GB-16GB-1TB-Original-New-Set-i.54618012.29455129269?extraParams=%7B%22display_model_id%22%3A253692482476%2C%22model_selection_logic%22%3A3%7D&sp_atk=b45b51e2-618f-4785-8cb1-fa77fec76e5d&xptdk=b45b51e2-618f-4785-8cb1-fa77fec76e5d"},{"shopId":"54618012","itemId":"44057977076","competitor":"Our Store","ourProduct":"Samsung Galaxy Z Fold 7","productUrl":"https://shopee.com.my/Samsung-Galaxy-Z-Fold-7-5G-12GB-256GB-12GB-512GB-16GB-1TB-Original-New-Set-i.54618012.44057977076?extraParams=%7B%22display_model_id%22%3A300674736635%2C%22model_selection_logic%22%3A3%7D&sp_atk=e1924abc-1a23-4552-82da-835380d6655f&xptdk=e1924abc-1a23-4552-82da-835380d6655f"},{"shopId":"54618012","itemId":"11613855795","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab A11 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-A11-Tab-A11-WiFi-LTE-Original-Malaysia-New-Set-i.54618012.11613855795?extraParams=%7B%22display_model_id%22%3A261869994913%2C%22model_selection_logic%22%3A3%7D&sp_atk=30fef643-51f4-4b6b-8955-da9f316fcb12&xptdk=30fef643-51f4-4b6b-8955-da9f316fcb12"},{"shopId":"54618012","itemId":"4934872394","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab A11 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-A11-Tab-A11-Tab-S10-Lite-(WiFi-5G)-WiFi-LTE-Version-Original-Malaysia-New-Set-i.54618012.4934872394?extraParams=%7B%22display_model_id%22%3A272035941449%2C%22model_selection_logic%22%3A3%7D&sp_atk=bbf1bb24-3cc5-4500-bb34-cd7848ed064b&xptdk=bbf1bb24-3cc5-4500-bb34-cd7848ed064b"},{"shopId":"54618012","itemId":"7300195418","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S10 Lite / S10 FE Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-Lite-(WiFi-5G)-S10-FE-S10-FE-(WiFi-5G)-Original-Malaysia-New-Set-i.54618012.7300195418?extraParams=%7B%22display_model_id%22%3A291743506595%2C%22model_selection_logic%22%3A3%7D&sp_atk=f88b10ea-e731-4790-961c-9903e60b0b5a&xptdk=f88b10ea-e731-4790-961c-9903e60b0b5a"},{"shopId":"54618012","itemId":"7347452888","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S11 Ultra / S11 / S10 Ultra / S10 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S11-Ultra-S11-S10-Ultra-S10-Wifi-5G-Version-Original-Malaysia-New-Set-i.54618012.7347452888?extraParams=%7B%22display_model_id%22%3A168586099387%2C%22model_selection_logic%22%3A3%7D&sp_atk=8bcd2855-b39f-4c52-85db-d973e4802bc7&xptdk=8bcd2855-b39f-4c52-85db-d973e4802bc7"},{"shopId":"54618012","itemId":"13376142675","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S10 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-FE-S10-FE-WiFi-Version-Tablet-Original-New-Set-i.54618012.13376142675?extraParams=%7B%22display_model_id%22%3A260536341469%2C%22model_selection_logic%22%3A3%7D&sp_atk=893dceb9-f5b1-4bf2-89cb-7904d54870f3&xptdk=893dceb9-f5b1-4bf2-89cb-7904d54870f3"},{"shopId":"54618012","itemId":"7147452785","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S11 Ultra / S11 / S10 Ultra / S10 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S11-Ultra-S11-S10-S10-Ultra-S10-FE-S10-FE-WiFi-5G-Version-Original-New-Set-i.54618012.7147452785?extraParams=%7B%22display_model_id%22%3A275420920078%2C%22model_selection_logic%22%3A3%7D&sp_atk=6401d7d3-c7b9-49bd-b8a5-21caf2a30e33&xptdk=6401d7d3-c7b9-49bd-b8a5-21caf2a30e33"},{"shopId":"54618012","itemId":"22575577652","competitor":"Our Store","ourProduct":"Our Store Listing","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-S10-Ultra-S11-S11-Ultra-5G-Wifi-Version-Original-New-Set-i.54618012.22575577652?extraParams=%7B%22display_model_id%22%3A242188779680%2C%22model_selection_logic%22%3A3%7D&sp_atk=cf73814c-c08f-4b64-b3a9-a4ba75d51898&xptdk=cf73814c-c08f-4b64-b3a9-a4ba75d51898"},{"shopId":"54618012","itemId":"27336292487","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S10 FE","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-FE-Tab-S10-FE-(12GB-256GB)-WiFi-5G-Version-Original-New-Set-i.54618012.27336292487?extraParams=%7B%22display_model_id%22%3A206073696910%2C%22model_selection_logic%22%3A3%7D&sp_atk=33d03c73-def0-4133-a821-ead9c3adff2f&xptdk=33d03c73-def0-4133-a821-ead9c3adff2f"},{"shopId":"54618012","itemId":"41570233341","competitor":"Our Store","ourProduct":"Our Store Listing","productUrl":"https://shopee.com.my/-NEW-PRODUCT-Samsung-Galaxy-Tab-S10-Lite-6GB-128GB-WiFi-5G-Tablet-Original-Malaysia-New-Set-i.54618012.41570233341?extraParams=%7B%22display_model_id%22%3A261652361612%2C%22model_selection_logic%22%3A3%7D&sp_atk=2887ea52-24b8-4d16-940c-8d6126036af1&xptdk=2887ea52-24b8-4d16-940c-8d6126036af1"},{"shopId":"54618012","itemId":"24636746049","competitor":"Our Store","ourProduct":"Our Store Listing","productUrl":"https://shopee.com.my/Samsung-Galaxy-Tab-S10-Galaxy-Tab-S10-Ultra-12GB-256GB-WiFi-5G-Version-Tablet-i.54618012.24636746049?extraParams=%7B%22display_model_id%22%3A233550890418%2C%22model_selection_logic%22%3A3%7D&sp_atk=7ea52e02-155d-4536-8615-16ca2f6f790a&xptdk=7ea52e02-155d-4536-8615-16ca2f6f790a"},{"shopId":"54618012","itemId":"42970558023","competitor":"Our Store","ourProduct":"Samsung Galaxy Tab S11 Mixed","productUrl":"https://shopee.com.my/-NEW-MODEL-Samsung-Galaxy-Tab-S11-S11-Ultra-12GB-256GB-512GB-WiFi-5G-Tablet-Original-Malaysia-New-Set-i.54618012.42970558023?extraParams=%7B%22display_model_id%22%3A291679733181%2C%22model_selection_logic%22%3A3%7D&sp_atk=369eb699-939f-4fd8-a26b-b0171bb385e9&xptdk=369eb699-939f-4fd8-a26b-b0171bb385e9"},{"shopId":"54618012","itemId":"2071903816","competitor":"Our Store","ourProduct":"Samsung Galaxy Buds Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Buds-4-Buds-4-Pro-Buds-3-FE-Buds-3-Buds-Core-Original-Malaysia-New-Set-i.54618012.2071903816?extraParams=%7B%22display_model_id%22%3A281434042555%2C%22model_selection_logic%22%3A3%7D&sp_atk=7d783510-aa0b-4dff-90af-8c0ccd5825d4&xptdk=7d783510-aa0b-4dff-90af-8c0ccd5825d4"},{"shopId":"54618012","itemId":"6218407214","competitor":"Our Store","ourProduct":"Samsung Galaxy Buds Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Buds-3-Buds3-Pro-Buds-3-FE-Buds-Core-Original-Malaysia-Set-i.54618012.6218407214?extraParams=%7B%22display_model_id%22%3A271434069240%2C%22model_selection_logic%22%3A3%7D&sp_atk=4ac31000-9cae-455b-8b7d-50ed7fd0ccb3&xptdk=4ac31000-9cae-455b-8b7d-50ed7fd0ccb3"},{"shopId":"54618012","itemId":"29155326353","competitor":"Our Store","ourProduct":"Samsung Galaxy Buds Mixed","productUrl":"https://shopee.com.my/-READY-STOCK-Samsung-Galaxy-Buds-4-Buds-4-Pro-Original-Malaysia-New-Set-i.54618012.29155326353?extraParams=%7B%22display_model_id%22%3A335587091444%2C%22model_selection_logic%22%3A3%7D&sp_atk=536f9272-50ee-41f6-86d2-db842606761c&xptdk=536f9272-50ee-41f6-86d2-db842606761c"},{"shopId":"54618012","itemId":"42970255011","competitor":"Our Store","ourProduct":"Samsung Galaxy Buds Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Buds-3-FE-Original-Malaysia-Set-i.54618012.42970255011?extraParams=%7B%22display_model_id%22%3A306653176211%2C%22model_selection_logic%22%3A3%7D&sp_atk=97bcc1e5-5a12-450d-8a57-e4e238133663&xptdk=97bcc1e5-5a12-450d-8a57-e4e238133663"},{"shopId":"54618012","itemId":"4563335547","competitor":"Our Store","ourProduct":"Samsung Galaxy Fit 3","productUrl":"https://shopee.com.my/Samsung-Galaxy-Fit-3-Fitness-Trackers-Fit-3-Original-Malaysia-New-Set-i.54618012.4563335547?extraParams=%7B%22display_model_id%22%3A250378232135%2C%22model_selection_logic%22%3A3%7D&sp_atk=5b3090a2-940e-4c0c-a5ee-fcee2aa40488&xptdk=5b3090a2-940e-4c0c-a5ee-fcee2aa40488"},{"shopId":"54618012","itemId":"10335851509","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch Ultra / Watch 8 Classic / Watch 8 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-Ultra-2025-Watch-8-Classic-Watch-8-Original-Malaysia-New-Set-i.54618012.10335851509?extraParams=%7B%22display_model_id%22%3A281190832744%2C%22model_selection_logic%22%3A3%7D&sp_atk=4043cbc2-0bc8-4d9c-928f-e06534d818cc&xptdk=4043cbc2-0bc8-4d9c-928f-e06534d818cc"},{"shopId":"54618012","itemId":"3345960282","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch 8 Classic / Watch 8 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-8-Classic-Watch-8-Bluetooth-Version-Original-Malaysia-New-Set-i.54618012.3345960282?extraParams=%7B%22display_model_id%22%3A39340820934%2C%22model_selection_logic%22%3A3%7D&sp_atk=6a81d9e9-53a2-4042-8271-81cb6c7f1586&xptdk=6a81d9e9-53a2-4042-8271-81cb6c7f1586"},{"shopId":"54618012","itemId":"5901074412","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch 8","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-8-40mm-44mm-Bluetooth-Version-Original-Malaysia-New-Set-i.54618012.5901074412?extraParams=%7B%22display_model_id%22%3A232641135203%2C%22model_selection_logic%22%3A3%7D&sp_atk=5ddbb228-3bd4-4c85-ae2c-714a665bf5ea&xptdk=5ddbb228-3bd4-4c85-ae2c-714a665bf5ea"},{"shopId":"54618012","itemId":"5001081545","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch 8 Classic / Watch 8 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-8-Classic-46mm-Bluetooth-Version-Original-Malaysia-New-Set-i.54618012.5001081545?extraParams=%7B%22display_model_id%22%3A256622816122%2C%22model_selection_logic%22%3A3%7D&sp_atk=c3a72674-0ba1-455e-89d5-a13246c0be66&xptdk=c3a72674-0ba1-455e-89d5-a13246c0be66"},{"shopId":"54618012","itemId":"26755317959","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch 8 Classic / Watch 8 Mixed","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-8-Watch-8-Classic-Bluetooth-Version-Original-Malaysia-New-Set-i.54618012.26755317959?extraParams=%7B%22display_model_id%22%3A405253138810%2C%22model_selection_logic%22%3A3%7D&sp_atk=99926253-8d8a-4b46-9c5e-3356013944c9&xptdk=99926253-8d8a-4b46-9c5e-3356013944c9"},{"shopId":"54618012","itemId":"43208224943","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch Ultra / Watch 8 Classic / Watch 8 Mixed","productUrl":"https://shopee.com.my/-Ready-Stock-Samsung-Galaxy-Watch-8-Watch-8-Classic-Watch-Ultra-2025-Original-Malaysia-New-Set-i.54618012.43208224943?extraParams=%7B%22display_model_id%22%3A260694995965%2C%22model_selection_logic%22%3A3%7D&sp_atk=79122269-339b-4b40-88fe-ddc91d48e0b9&xptdk=79122269-339b-4b40-88fe-ddc91d48e0b9"},{"shopId":"54618012","itemId":"19533340383","competitor":"Our Store","ourProduct":"Samsung Galaxy Watch Ultra 2025","productUrl":"https://shopee.com.my/Samsung-Galaxy-Watch-Ultra-2025-Version-Original-Malaysia-New-Set-i.54618012.19533340383?extraParams=%7B%22display_model_id%22%3A405243665208%2C%22model_selection_logic%22%3A3%7D&sp_atk=eed9b61e-cfc0-406e-885d-7d861dca2a34&xptdk=eed9b61e-cfc0-406e-885d-7d861dca2a34"}];/*ITEMMAP_END*/</script>
+    <script>const REMOTE_DATA_URL = '/data/records.json';
+const STORAGE_KEY = 'd3-price-console-records-v1';
+
+const state = {
+  records: [],
+  search: '',
+  shopFilter: '',
+  seriesFilter: '',
+  modelFilter: '',
+  detailsExpanded: false,
+  source: 'Loading data/records.json ...',
+};
+const CLOUD_ONLY_MODE = /^https?:$/i.test(location.protocol);
+
+const fileInput = document.getElementById('fileInput');
+const exportCsvButton = document.getElementById('exportCsv');
+const exportJsonButton = document.getElementById('exportJson');
+const clearButton = document.getElementById('clearAll');
+const dropzone = document.getElementById('dropzone');
+const pasteInput = document.getElementById('pasteInput');
+const importPasteButton = document.getElementById('importPaste');
+const searchInput = document.getElementById('searchInput');
+const watchlistCompetitor = document.getElementById('watchlistCompetitor');
+const watchlistLinksInput = document.getElementById('watchlistLinksInput');
+const prepareWatchlistLinksButton = document.getElementById('prepareWatchlistLinks');
+const copyWatchlistCommandsButton = document.getElementById('copyWatchlistCommands');
+const watchlistLinksResult = document.getElementById('watchlistLinksResult');
+const shopFilter = document.getElementById('shopFilter');
+const seriesFilter = document.getElementById('seriesFilter');
+const modelFilter = document.getElementById('modelFilter');
+const tableToggle = document.getElementById('tableToggle');
+const tablePanel = document.getElementById('tablePanel');
+const tableSummary = document.getElementById('tableSummary');
+const tableBody = document.getElementById('tableBody');
+const dropList = document.getElementById('dropList');
+
+const metricProducts = document.getElementById('metricProducts');
+const metricVariants = document.getElementById('metricVariants');
+const metricShops = document.getElementById('metricShops');
+const metricLatest = document.getElementById('metricLatest');
+const metricDrops = document.getElementById('metricDrops');
+const metricMaxDrop = document.getElementById('metricMaxDrop');
+const DEFAULT_VOUCHER_DISCOUNT = 5;
+const SHOP_ROLE_BY_SHOP = {
+  '116917349': 'A',
+  '77792787': 'B',
+  '271823454': 'C',
+  '56447030': 'D',
+};
+const ROLE_LABELS = {
+  A: 'Deal Direct',
+  B: 'Spray Gadget',
+  C: 'TAC Mobiles',
+  D: 'Urban Republic',
+};
+let pendingWatchlistCommands = '';
+bootstrap();
+
+function afterVoucher(value, discount = DEFAULT_VOUCHER_DISCOUNT) {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Number((n - discount).toFixed(2)));
+}
+
+function formatRmDisplay(value) {
+  if (value == null) return '-';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '-';
+  return `RM${n.toFixed(2).replace(/\.00$/, '')}`;
+}
+
+function activeBossRole() {
+  return window.D3_BOSS_SELECTED_ROLE || '';
+}
+
+function roleLabel(role) {
+  return ROLE_LABELS[role] || '';
+}
+
+function rowRole(row) {
+  return SHOP_ROLE_BY_SHOP[String(row?.shopId || '')] || '';
+}
+
+function matchesCurrentFilters(row, options = {}) {
+  const {
+    includeShop = true,
+    includeSeries = true,
+    includeModel = true,
+    includeSearch = true,
+    includeBossRole = true,
+  } = options;
+  const shop = sellerLabel(row);
+  const model = modelLabel(row);
+  const series = seriesLabel(model);
+  const bossRole = activeBossRole();
+
+  if (includeBossRole && bossRole && rowRole(row) !== bossRole) return false;
+  if (includeShop && state.shopFilter && shop !== state.shopFilter) return false;
+  if (includeSeries && state.seriesFilter && series !== state.seriesFilter) return false;
+  if (includeModel && state.modelFilter && model !== state.modelFilter) return false;
+  if (!includeSearch || !state.search) return true;
+
+  const haystack = [
+    row.title,
+    shop,
+    series,
+    model,
+    row.color,
+    row.capacity,
+    row.tier,
+    row.variantName,
+    row.shopId,
+    row.itemId,
+  ].join(' ').toLowerCase();
+  return haystack.includes(state.search);
+}
+
+function shouldAutoExpandDetails() {
+  return Boolean(
+    state.detailsExpanded ||
+    state.search ||
+    state.shopFilter ||
+    state.seriesFilter ||
+    state.modelFilter ||
+    activeBossRole()
+  );
+}
+
+function renderDetailsPanel() {
+  const expanded = shouldAutoExpandDetails();
+  tablePanel.hidden = !expanded;
+  tableToggle.textContent = expanded ? 'Hide details' : 'Show details';
+  tableToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+
+  const parts = [];
+  if (activeBossRole()) parts.push(`${roleLabel(activeBossRole())} selected`);
+  if (state.shopFilter) parts.push(state.shopFilter);
+  if (state.seriesFilter) parts.push(state.seriesFilter);
+  if (state.modelFilter) parts.push(state.modelFilter);
+  if (state.search) parts.push(`search: ${state.search}`);
+  tableSummary.textContent = parts.length
+    ? `Showing filtered details for ${parts.join(' · ')}.`
+    : 'Use filters or a competitor button to inspect specific product rows.';
+}
+
+async function bootstrap() {
+  bindEvents();
+  if (CLOUD_ONLY_MODE) {
+    state.source = 'Waiting for latest cloud data ...';
+    render();
+    return;
+  }
+
+  const embedded = Array.isArray(window.D3_EMBEDDED_RECORDS)
+    ? window.D3_EMBEDDED_RECORDS.map(normalizeRecord).filter(Boolean)
+    : [];
+
+  if (embedded.length) {
+    const localSeed = loadLocalRecords();
+    const seedByKey = new Map(localSeed.map((r) => [recordKey(r), r]));
+    for (const r of embedded) if (!seedByKey.has(recordKey(r))) seedByKey.set(recordKey(r), r);
+    state.records = sortRecords(Array.from(seedByKey.values()));
+    state.source = `Merged embedded snapshot data with local imports. ${state.records.length} record(s) loaded. Imported data stays after refresh.`;
+    persistLocalRecords();
+    render();
+    return;
+  }
+
+  const local = loadLocalRecords();
+  if (local.length) {
+    state.records = sortRecords(local);
+    state.source = 'Showing locally cached browser data.';
+    render();
+  } else {
+    render();
+  }
+
+  try {
+    const response = await fetch(`${REMOTE_DATA_URL}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const remote = Array.isArray(payload) ? payload : [];
+    state.records = sortRecords(remote.map(normalizeRecord).filter(Boolean));
+    state.source = `Loaded ${state.records.length} record(s) from ${REMOTE_DATA_URL}.`;
+    persistLocalRecords();
+  } catch (error) {
+    if (!state.records.length) {
+      state.source = 'Could not auto-load data/records.json. Please import JSON manually.';
+    } else {
+      state.source = `Remote load failed. Continuing with local cache. Reason: ${error.message}`;
+    }
+  }
+
+  render();
+}
+
+function bindEvents() {
+  fileInput.addEventListener('change', async (event) => {
+    await importFiles(event.target.files);
+    fileInput.value = '';
+  });
+
+  dropzone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    dropzone.style.borderColor = '#9a6b16';
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.style.borderColor = '';
+  });
+
+  dropzone.addEventListener('drop', async (event) => {
+    event.preventDefault();
+    dropzone.style.borderColor = '';
+    await importFiles(event.dataTransfer.files);
+  });
+
+  importPasteButton.addEventListener('click', () => {
+    if (!pasteInput.value.trim()) return;
+    try {
+      const payload = JSON.parse(pasteInput.value);
+      mergeIncoming(Array.isArray(payload) ? payload : [payload], 'Pasted JSON imported.');
+      pasteInput.value = '';
+    } catch (error) {
+      alert(`JSON parse failed: ${error.message}`);
+    }
+  });
+
+  prepareWatchlistLinksButton.addEventListener('click', () => {
+    prepareWatchlistCommands();
+  });
+
+  copyWatchlistCommandsButton.addEventListener('click', async () => {
+    if (!pendingWatchlistCommands) prepareWatchlistCommands();
+    if (!pendingWatchlistCommands) return;
+    await navigator.clipboard.writeText(pendingWatchlistCommands);
+    copyWatchlistCommandsButton.textContent = 'Copied';
+    setTimeout(() => { copyWatchlistCommandsButton.textContent = 'Copy add commands'; }, 1400);
+  });
+
+  searchInput.addEventListener('input', () => {
+    state.search = searchInput.value.trim().toLowerCase();
+    render();
+  });
+
+  shopFilter.addEventListener('change', () => {
+    state.shopFilter = shopFilter.value;
+    render();
+  });
+
+  seriesFilter.addEventListener('change', () => {
+    state.seriesFilter = seriesFilter.value;
+    render();
+  });
+
+  modelFilter.addEventListener('change', () => {
+    state.modelFilter = modelFilter.value;
+    render();
+  });
+
+  tableToggle.addEventListener('click', () => {
+    state.detailsExpanded = !shouldAutoExpandDetails();
+    renderDetailsPanel();
+  });
+
+  exportCsvButton.addEventListener('click', () => {
+    const csv = buildCsv(filteredRows());
+    downloadFile('d3-price-console.csv', csv, 'text/csv;charset=utf-8');
+  });
+
+  exportJsonButton.addEventListener('click', () => {
+    downloadFile(
+      'd3-price-console.json',
+      JSON.stringify(state.records, null, 2),
+      'application/json'
+    );
+  });
+
+  clearButton.addEventListener('click', () => {
+    if (!window.confirm('Clear all records currently shown in this console?')) return;
+    state.records = [];
+    state.source = 'Current data has been cleared.';
+    persistLocalRecords();
+    render();
+  });
+}
+
+function loadLocalRecords() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(normalizeRecord).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistLocalRecords() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.records));
+  } catch {
+    // 忽略 file:// 或隐私模式下的存储失败
+  }
+}
+
+async function importFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+
+  const incoming = [];
+  for (const file of files) {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    if (Array.isArray(payload)) incoming.push(...payload);
+    else incoming.push(payload);
+  }
+
+  mergeIncoming(incoming, `Imported ${files.length} JSON file(s).`);
+}
+
+function mergeIncoming(items, sourceText) {
+  const incoming = items.map(normalizeRecord).filter(Boolean);
+  const byKey = new Map(state.records.map((record) => [recordKey(record), record]));
+  for (const record of incoming) {
+    byKey.set(recordKey(record), record);
+  }
+
+  state.records = sortRecords(Array.from(byKey.values()));
+  state.source = sourceText;
+  persistLocalRecords();
+  render();
+}
+
+function normalizeRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+  if (!Array.isArray(record.variants)) return null;
+
+  const itemModel = String(record.ourProduct || record.itemModel || '');
+  return {
+    schemaVersion: Number(record.schemaVersion || 1),
+    grabbedAt: String(record.grabbedAt || new Date().toISOString()),
+    pageUrl: String(record.pageUrl || ''),
+    shopId: String(record.shopId || ''),
+    itemId: String(record.itemId || ''),
+    sellerName: String(record.sellerName || ''),
+    sourceSellerName: String(record.sourceSellerName || ''),
+    competitor: String(record.competitor || ''),
+    ourProduct: String(record.ourProduct || ''),
+    ourPrice: String(record.ourPrice || ''),
+    itemModel: String(record.itemModel || record.ourProduct || ''),
+    title: String(record.title || 'Untitled product'),
+    currency: String(record.currency || 'MYR'),
+    variants: record.variants
+      .map((variant) => normalizeVariant(variant, {
+        title: record.title,
+        itemModel,
+      }))
+      .filter(Boolean),
+  };
+}
+
+// 产品主数据：单容量机型「型号|网络 → 存储」补全表（Sarah 官方清单 config/product-master.txt）。
+// 仅在 capacity 为空时兜底；多容量机型(A57/S系列/Z系列/平板)不在此，靠款式名里的容量数字。
+const MASTER_STORAGE = {
+  'A06|4G':'128GB','A06|5G':'128GB',
+  'A07|4G':'256GB','A07|5G':'256GB',
+  'A16|4G':'256GB','A16|5G':'256GB',
+  'A17|4G':'256GB','A17|5G':'256GB',
+  'A26|5G':'256GB','A36|5G':'256GB','A37|5G':'256GB','A56|5G':'256GB',
+  'A26|':'256GB','A36|':'256GB','A37|':'256GB','A56|':'256GB',
+};
+function detectNetwork(text) {
+  const s = String(text || '');
+  if (/\b5G\b/i.test(s)) return '5G';
+  if (/\b(4G|LTE)\b/i.test(s)) return '4G';
+  return '';
+}
+function masterCapacity(model, name, title) {
+  const hay = `${model || ''} ${name || ''} ${title || ''}`;
+  const mm = hay.match(/\bA(0?\d{1,2})\b/i);
+  if (!mm) return '';
+  const base = 'A' + String(mm[1]).padStart(2, '0');
+  const net = detectNetwork(`${model || ''} ${name || ''}`);
+  return MASTER_STORAGE[`${base}|${net}`] || MASTER_STORAGE[`${base}|`] || '';
+}
+// A 系列低端有 4G/5G 两版：model 没带网络但款式名带时补上，让 A07 4G / A07 5G 能分行
+function ensureNetwork(model, name) {
+  if (!model || /\b(4G|5G|LTE)\b/i.test(model) || !/^A\d/i.test(model)) return model;
+  const net = detectNetwork(name);
+  return net ? `${model} ${net}` : model;
+}
+
+function normalizeVariant(variant, context = {}) {
+  if (!variant || typeof variant !== 'object') return null;
+  const parsed = inferVariantMeta(variant.name, context);
+  const model = ensureNetwork(String(variant.model || parsed.model || ''), variant.name);
+  let capacity = String(variant.capacity || parsed.capacity || '');
+  if (!capacity) capacity = masterCapacity(model, variant.name, context.title);
+  return {
+    name: String(variant.name || parsed.rawName || 'Default variant'),
+    model: model,
+    color: String(variant.color || parsed.color || ''),
+    capacity: capacity,
+    tier: String(variant.tier || parsed.tier || ''),
+    confidence: String(variant.confidence || parsed.confidence || 'uncertain'),
+    currentPrice: toNumberOrNull(variant.currentPrice),
+    originalPrice: toNumberOrNull(variant.originalPrice),
+    promoPrice: toNumberOrNull(variant.promoPrice),
+    stock: variant.stock == null ? null : Number(variant.stock),
+    inStock: Boolean(variant.inStock),
+  };
+}
+
+function inferVariantMeta(rawName, context = {}) {
+  const normalizeSpaces = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+  const cleanModel = (text) => normalizeSpaces(String(text || '')
+    .replace(/^Samsung Galaxy\s+/i, '')
+    .replace(/^Samsung\s+/i, '')
+    .replace(/\s+Mixed$/i, ''));
+  const source = normalizeSpaces(rawName || '');
+  const title = normalizeSpaces(context.title || '');
+  const itemModel = cleanModel(context.itemModel || '');
+  const mixed = (text) => /mixed/i.test(String(text || '')) || String(text || '').includes('/');
+  const fromPattern = (text) => {
+    const s = normalizeSpaces(text);
+    let m = s.match(/^A(0?\d{1,2})(5G|LTE|4G)?/i);
+    if (m) return `A${String(m[1]).padStart(2, '0')}${m[2] ? ` ${m[2].toUpperCase()}` : ''}`;
+    m = s.match(/^S(2\d)(Ultra|\+|Plus)?/i);
+    if (m) return `S${m[1]}${m[2] ? (m[2] === '+' ? '+' : m[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
+    m = s.match(/\bA0?(\d{1,2})\s*(5G|LTE|4G)?\b/i);
+    if (m) return `A${String(m[1]).padStart(2, '0')}${m[2] ? ` ${m[2].toUpperCase()}` : ''}`;
+    m = s.match(/\bS\s*(2\d)\s*(Ultra|\+|Plus)?\b/i);
+    if (m) return `S${m[1]}${m[2] ? (m[2] === '+' ? '+' : m[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
+    m = s.match(/\bZ\s*(Flip|Fold)\s*(\d)\b/i);
+    if (m) return `Z ${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}`;
+    m = s.match(/\bTab\s*(A\d+|S\d+\s*(?:FE|Lite|Ultra)?)\b/i);
+    if (m) return `Tab ${normalizeSpaces(m[1])}`;
+    m = s.match(/\bWatch\s*(Ultra|\d+\s*Classic|\d+)\b/i);
+    if (m) return `Watch ${normalizeSpaces(m[1])}`;
+    return '';
+  };
+  const normalizeCapacity = (text) => {
+    const s = normalizeSpaces(text).replace(/[()]/g, '');
+    const withoutModel = s.replace(/^A0?\d{1,2}(?:5G|LTE|4G)?/i, '').replace(/^S2\d(?:Ultra|\+|Plus)?/i, '').trim();
+    const source = withoutModel && withoutModel !== s ? withoutModel : s;
+    let m = source.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i);
+    if (m) return `${m[1]}+${m[2]}${(m[3] || 'GB').toUpperCase()}`;
+    m = source.match(/(\d+)\+(\d+)(GB|TB)/i);
+    if (m) return `${m[1]}+${m[2]}${m[3].toUpperCase()}`;
+    m = source.match(/\b(\d+)\s*(GB|TB)\b/i);
+    if (m) return `${m[1]}${m[2].toUpperCase()}`;
+    m = source.match(/\b(128|256|512|1024)\b/i);
+    if (m) return `${m[1]}GB`;
+    m = withoutModel.match(/(\d+)(GB|TB)/i);
+    if (m) return `${m[1]}${m[2].toUpperCase()}`;
+    return '';
+  };
+  const normalizeTier = (text) => {
+    const s = normalizeSpaces(text);
+    if (/promo/i.test(s)) return s.match(/promo(?:\s*\(gift set\)|\s*\d+)?/i)?.[0] || 'Promo';
+    if (/basic/i.test(s)) return s.match(/basic(?:\s*\d+)?/i)?.[0] || 'Basic';
+    if (/gift\s*set|gift/i.test(s)) return s.match(/gift(?:\s*set|\s*\d+)?/i)?.[0] || 'Gift';
+    if (/set\s*[a-z0-9]+/i.test(s)) return s.match(/set\s*[a-z0-9]+/i)?.[0] || s;
+    if (/standard/i.test(s)) return 'Standard';
+    return '';
+  };
+  const colors = ['Awesome Icyblue','Awesome Gray','Awesome Navy','Icy Blue','P.Gold','Peach Gold','Sky Blue','Cobalt Violet','Olive','Violet','Purple','Black','White','Blue','Silver','Gray','Grey','Gold','Green','Pink','Navy','Cream'];
+  const model = fromPattern(source) || (!mixed(title) ? fromPattern(title) : '') || (!mixed(itemModel) ? itemModel : '');
+  const capacity = normalizeCapacity(source);
+  const tier = normalizeTier(source);
+  let color = '';
+  for (const name of colors) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(source)) {
+      color = name;
+      break;
+    }
+  }
+  if (!color) {
+    const stripped = normalizeSpaces(source
+      .replace(new RegExp((model || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ')
+      .replace(new RegExp((capacity || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ')
+      .replace(new RegExp((tier || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ')
+      .replace(/^A\d{2}(?:5G|LTE|4G)?/i, ' ')
+      .replace(/^S2\d(?:Ultra|\+|Plus)?/i, ' ')
+      .replace(/[(),/]+/g, ' '));
+    const bits = stripped.split(/\s+/).filter(Boolean);
+    color = bits.slice(-2).join(' ');
+  }
+  return {
+    rawName: source || 'Default variant',
+    model,
+    color: color || '',
+    capacity,
+    tier,
+    confidence: fromPattern(source) ? 'confirmed' : (model && capacity ? 'parsed' : model ? 'fallback' : 'uncertain'),
+  };
+}
+
+function toNumberOrNull(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function recordKey(record) {
+  return `${record.shopId}:${record.itemId}:${record.grabbedAt}`;
+}
+
+function variantIdentity(record, variant) {
+  return `${record.shopId}:${record.itemId}:${variant.name}`;
+}
+
+function sortRecords(records) {
+  return [...records].sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime());
+}
+
+function modelLabel(item) {
+  if (item?.model) return String(item.model).trim();
+  const mapped = window.D3_ITEM_MODEL && window.D3_ITEM_MODEL[String(item.itemId)];
+  if (mapped) return String(mapped).trim();
+  const title = String(item.title || '');
+  const patterns = [
+    /Galaxy\s+(S\d+\s*(?:Ultra|\+|Plus)?)/i,
+    /Galaxy\s+(A\d+\s*(?:5G|LTE)?)/i,
+    /Galaxy\s+(Z\s*(?:Flip|Fold)\s*\d+)/i,
+    /Galaxy\s+(Tab\s+[A-Z0-9 ]+)/i,
+    /Galaxy\s+(Watch\s+[A-Z0-9 ]+)/i,
+    /Galaxy\s+(Buds\s+[A-Z0-9 ]+)/i,
+    /Galaxy\s+(Fit\s+\d+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = title.match(pattern);
+    if (match) return match[1].replace(/\s+/g, ' ').trim();
+  }
+  return shortTitle(title);
+}
+
+function seriesLabel(model) {
+  const text = String(model || '').trim();
+  if (!text) return 'Other';
+  if (/^A\d+/i.test(text)) return 'Galaxy A';
+  if (/^S\d+/i.test(text)) return 'Galaxy S';
+  if (/^Z\s*Flip|^Z\s*Fold/i.test(text)) return 'Galaxy Z';
+  if (/^Tab\b/i.test(text)) return 'Galaxy Tab';
+  if (/^Watch\b/i.test(text)) return 'Galaxy Watch';
+  if (/^Buds\b/i.test(text)) return 'Galaxy Buds';
+  if (/^Fit\b/i.test(text)) return 'Galaxy Fit';
+  return 'Other';
+}
+
+function setSelectOptions(select, options, selected, allLabel) {
+  const list = ['<option value="">' + escapeHtml(allLabel) + '</option>']
+    .concat(options.map((option) => {
+      const isSelected = option === selected ? ' selected' : '';
+      return `<option value="${escapeAttribute(option)}"${isSelected}>${escapeHtml(option)}</option>`;
+    }));
+  select.innerHTML = list.join('');
+}
+
+function shopeeIdsFromUrl(url) {
+  const text = String(url || '').trim();
+  return text.match(/-i\.(\d+)\.(\d+)/) || text.match(/product\/(\d+)\/(\d+)/);
+}
+
+function canonicalShopeeUrl(url) {
+  const text = String(url || '').trim();
+  const match = shopeeIdsFromUrl(text);
+  if (!match) return text;
+  const slugMatch = text.match(/shopee\.com\.my\/([^?]+)/i);
+  const slug = slugMatch ? slugMatch[1].replace(/\/+$/, '') : `product/${match[1]}/${match[2]}`;
+  return `https://shopee.com.my/${slug}`;
+}
+
+function watchlistKey(shopId, itemId) {
+  return `${shopId}:${itemId}`;
+}
+
+function currentWatchlistMap() {
+  const items = Array.isArray(window.D3_WATCHLIST) ? window.D3_WATCHLIST : [];
+  return new Map(items.map((item) => [watchlistKey(item.shopId, item.itemId), item]));
+}
+
+function mappedCompetitorName(record) {
+  if (!record) return '';
+  const shopId = String(record.shopId || '').trim();
+  const itemId = String(record.itemId || '').trim();
+  if (!shopId || !itemId) return '';
+  return currentWatchlistMap().get(watchlistKey(shopId, itemId))?.competitor || '';
+}
+
+const SHOP_NAME_FALLBACK = {
+  '54618012': 'Our Store',
+  '116917349': 'Deal Direct',
+  '77792787': 'Spray Gadget',
+  '271823454': 'TAC Mobiles',
+  '56447030': 'Urban Republic',
+};
+
+function prepareWatchlistCommands() {
+  const competitor = watchlistCompetitor.value;
+  const raw = watchlistLinksInput.value || '';
+  const urls = raw.match(/https?:\/\/[^\s]+/g) || [];
+  if (!urls.length) {
+    pendingWatchlistCommands = '';
+    watchlistLinksResult.textContent = 'No Shopee links found.';
+    return;
+  }
+
+  const seen = new Set();
+  const watchlist = currentWatchlistMap();
+  const fresh = [];
+  const skipped = [];
+  const invalid = [];
+
+  for (const url of urls) {
+    const match = shopeeIdsFromUrl(url);
+    if (!match) {
+      invalid.push(url);
+      continue;
+    }
+    const shopId = match[1];
+    const itemId = match[2];
+    const key = watchlistKey(shopId, itemId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (watchlist.has(key)) {
+      const existing = watchlist.get(key);
+      skipped.push(`${existing.competitor || 'Watchlist'} | ${canonicalShopeeUrl(existing.productUrl || url)}`);
+      continue;
+    }
+    fresh.push(canonicalShopeeUrl(url));
+  }
+
+  pendingWatchlistCommands = fresh.map((url) => `/add ${competitor} ${url}`).join('\n');
+  const lines = [
+    `Selected competitor: ${competitor}`,
+    `New links: ${fresh.length}`,
+    `Already in watchlist: ${skipped.length}`,
+    `Invalid links: ${invalid.length}`,
+    '',
+  ];
+  if (fresh.length) {
+    lines.push('Commands to send to Telegram bot:');
+    lines.push(pendingWatchlistCommands);
+    lines.push('');
+  }
+  if (skipped.length) {
+    lines.push('Skipped existing links:');
+    lines.push(...skipped.slice(0, 12));
+    if (skipped.length > 12) lines.push(`...and ${skipped.length - 12} more`);
+    lines.push('');
+  }
+  if (invalid.length) {
+    lines.push('Invalid lines:');
+    lines.push(...invalid.slice(0, 8));
+  }
+  watchlistLinksResult.textContent = lines.join('\n').trim();
+}
+
+function renderFilterOptions() {
+  const rows = flattenRecords(state.records);
+  const shopScopedRows = rows.filter((row) => matchesCurrentFilters(row, {
+    includeShop: false,
+    includeSeries: false,
+    includeModel: false,
+    includeSearch: false,
+  }));
+  const seriesScopedRows = rows.filter((row) => matchesCurrentFilters(row, {
+    includeSeries: false,
+    includeModel: false,
+    includeSearch: false,
+  }));
+  const modelScopedRows = rows.filter((row) => matchesCurrentFilters(row, {
+    includeModel: false,
+    includeSearch: false,
+  }));
+
+  const shopOptions = Array.from(new Set(shopScopedRows.map((row) => sellerLabel(row)))).sort();
+  const seriesOptions = Array.from(new Set(seriesScopedRows.map((row) => seriesLabel(modelLabel(row))).filter(Boolean))).sort();
+  const modelOptions = Array.from(new Set(modelScopedRows.map((row) => modelLabel(row)).filter(Boolean))).sort();
+
+  if (state.shopFilter && !shopOptions.includes(state.shopFilter)) state.shopFilter = '';
+  if (state.seriesFilter && !seriesOptions.includes(state.seriesFilter)) state.seriesFilter = '';
+  if (state.modelFilter && !modelOptions.includes(state.modelFilter)) state.modelFilter = '';
+
+  setSelectOptions(shopFilter, shopOptions, state.shopFilter, 'All shops');
+  setSelectOptions(seriesFilter, seriesOptions, state.seriesFilter, 'All series');
+  setSelectOptions(modelFilter, modelOptions, state.modelFilter, 'All models');
+}
+
+function flattenRecords(records) {
+  return records.flatMap((record) =>
+    record.variants.map((variant) => ({
+      grabbedAt: record.grabbedAt,
+      title: record.title,
+      sellerName: record.sellerName,
+      pageUrl: record.pageUrl,
+      shopId: record.shopId,
+      itemId: record.itemId,
+      coupons: Array.isArray(record.coupons) ? record.coupons : [], // 店铺券（抓取端填）：字符串或 {label} 数组
+      variantName: variant.name,
+      model: variant.model || '',
+      color: variant.color || '',
+      capacity: variant.capacity || '',
+      tier: variant.tier || '',
+      confidence: variant.confidence || '',
+      currentPrice: variant.currentPrice,
+      originalPrice: variant.originalPrice,
+      promoPrice: variant.promoPrice,
+      inStock: variant.inStock,
+      stock: variant.stock,
+    }))
+  );
+}
+
+function filteredRows() {
+  return flattenRecords(state.records).filter((row) => matchesCurrentFilters(row));
+}
+
+function buildCsv(rows) {
+  const header = [
+    'grabbed_at',
+    'title',
+    'seller_name',
+    'page_url',
+    'shop_id',
+    'item_id',
+    'model',
+    'color',
+    'capacity',
+    'tier',
+    'confidence',
+    'variant_name',
+    'current_price',
+    'original_price',
+    'promo_price',
+    'in_stock',
+    'stock',
+  ];
+
+  const lines = [header]
+    .concat(
+      rows.map((row) => [
+        row.grabbedAt,
+        row.title,
+        row.sellerName,
+        row.pageUrl,
+        row.shopId,
+        row.itemId,
+        row.model,
+        row.color,
+        row.capacity,
+        row.tier,
+        row.confidence,
+        row.variantName,
+        row.currentPrice ?? '',
+        row.originalPrice ?? '',
+        row.promoPrice ?? '',
+        row.inStock ? 'true' : 'false',
+        row.stock ?? '',
+      ])
+    )
+    .map((cells) => cells.map(csvCell).join(','));
+
+  return lines.join('\n');
+}
+
+function csvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function downloadFile(name, body, type) {
+  const blob = new Blob([body], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function buildDropReport(records) {
+  const byVariant = new Map();
+
+  for (const record of records) {
+    for (const variant of record.variants) {
+      const key = variantIdentity(record, variant);
+      if (!byVariant.has(key)) byVariant.set(key, []);
+      byVariant.get(key).push({
+        grabbedAt: record.grabbedAt,
+        title: record.title,
+        sellerName: record.sellerName,
+        pageUrl: record.pageUrl,
+        shopId: record.shopId,
+        itemId: record.itemId,
+        variantName: variant.name,
+        currentPrice: variant.currentPrice,
+      });
+    }
+  }
+
+  const drops = [];
+  for (const history of byVariant.values()) {
+    history.sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime());
+    if (history.length < 2) continue;
+
+    const latest = history[0];
+    const previous = history[1];
+    if (latest.currentPrice == null || previous.currentPrice == null) continue;
+    if (latest.currentPrice >= previous.currentPrice) continue;
+
+    drops.push({
+      ...latest,
+      previousGrabbedAt: previous.grabbedAt,
+      previousPrice: previous.currentPrice,
+      dropAmount: Number((previous.currentPrice - latest.currentPrice).toFixed(2)),
+    });
+  }
+
+  return drops.sort((a, b) => b.dropAmount - a.dropAmount);
+}
+
+function buildChangeReport(records) {
+  const byVariant = new Map();
+
+  for (const record of records) {
+    for (const variant of record.variants) {
+      const key = variantIdentity(record, variant);
+      if (!byVariant.has(key)) byVariant.set(key, []);
+      byVariant.get(key).push({
+        grabbedAt: record.grabbedAt,
+        title: record.title,
+        sellerName: record.sellerName,
+        pageUrl: record.pageUrl,
+        shopId: record.shopId,
+        itemId: record.itemId,
+        variantName: variant.name,
+        currentPrice: variant.currentPrice,
+        inStock: variant.inStock,
+      });
+    }
+  }
+
+  const changes = [];
+  for (const history of byVariant.values()) {
+    history.sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime());
+    const latest = history[0];
+    const previous = history[1] || null;
+    let status = 'same';
+    let delta = null;
+
+    if (!previous) {
+      status = 'new';
+    } else if (latest.currentPrice != null && previous.currentPrice != null) {
+      delta = Number((latest.currentPrice - previous.currentPrice).toFixed(2));
+      if (delta > 0) status = 'up';
+      else if (delta < 0) status = 'down';
+    }
+
+    changes.push({
+      ...latest,
+      previousPrice: previous?.currentPrice ?? null,
+      previousGrabbedAt: previous?.grabbedAt ?? null,
+      delta,
+      status,
+    });
+  }
+
+  return changes.sort((a, b) => {
+    const bySeller = sellerLabel(a).localeCompare(sellerLabel(b));
+    if (bySeller !== 0) return bySeller;
+    const byTitle = a.title.localeCompare(b.title);
+    if (byTitle !== 0) return byTitle;
+    return a.variantName.localeCompare(b.variantName);
+  });
+}
+
+function sellerLabel(record) {
+  const shopId = String(record?.shopId || '').trim();
+  return mappedCompetitorName(record) || SHOP_NAME_FALLBACK[shopId] || record.sellerName || `Shop ${shopId || '-'}`;
+}
+
+function shortTitle(title) {
+  return title.length > 64 ? `${title.slice(0, 64)}...` : title;
+}
+
+function splitVariantDisplay(row) {
+  const fallback = inferVariantMeta(row.variantName, { title: row.title, itemModel: row.model });
+  return {
+    color: row.color || fallback.color || '—',
+    capacity: row.capacity || fallback.capacity || '—',
+    detail: row.tier || fallback.tier || '',
+  };
+}
+
+function formatPrice(value) {
+  return value == null ? 'N/A' : formatRmDisplay(value);
+}
+
+function formatStatus(change) {
+  if (change.status === 'down') return `Price down ${formatPrice(Math.abs(change.delta))}`;
+  if (change.status === 'up') return `Price up ${formatPrice(change.delta)}`;
+  if (change.status === 'new') return 'First record';
+  return 'No change';
+}
+
+function render() {
+  renderFilterOptions();
+  renderDetailsPanel();
+  const records = state.records;
+  const rows = filteredRows();
+  const drops = buildDropReport(records);
+
+  metricProducts.textContent = String(new Set(rows.map((row) => `${row.shopId}:${row.itemId}`)).size);
+  metricVariants.textContent = String(rows.length);
+  metricShops.textContent = String(new Set(rows.map((row) => row.shopId)).size);
+  metricLatest.textContent = records[0]?.grabbedAt?.replace('T', ' ').replace('Z', ' UTC') || '-';
+  metricDrops.textContent = String(drops.length);
+  metricMaxDrop.textContent = drops.length ? formatRmDisplay(drops[0].dropAmount) : '-';
+
+  renderDropList(drops);
+
+  if (!rows.length) {
+    tableBody.innerHTML = `<tr><td colspan="9" class="muted">${escapeHtml(state.source)}</td></tr>`;
+    return;
+  }
+
+  tableBody.innerHTML = rows
+    .map((row) => {
+      const variant = splitVariantDisplay(row);
+      const couponsHtml = (row.coupons || []).map((c) => {
+        const label = typeof c === 'string' ? c : (c && c.label) || '';
+        return label ? `<span style="display:inline-block;margin:3px 4px 0 0;padding:2px 7px;border-radius:6px;background:rgba(250,204,21,.22);color:#7a5c10;font-size:11px;font-weight:700">🎟 ${escapeHtml(label)}</span>` : '';
+      }).join('');
+      const price = formatRmDisplay(afterVoucher(row.currentPrice));
+      const original = formatRmDisplay(row.originalPrice);
+      const stockClass = row.inStock ? 'pill' : 'pill out';
+      const stockLabel = row.inStock ? `In stock${row.stock != null ? ` (${row.stock})` : ''}` : 'Out of stock';
+      return `
+        <tr>
+          <td class="mono">${escapeHtml(row.grabbedAt)}</td>
+          <td>
+            <strong>${escapeHtml(row.title)}</strong><br>
+            <span class="muted">${escapeHtml(sellerLabel(row))}</span>
+            ${couponsHtml ? `<div>${couponsHtml}</div>` : ''}
+          </td>
+          <td>${escapeHtml(variant.color)}</td>
+          <td>${escapeHtml(variant.capacity)}${variant.detail ? `<div class="muted" style="font-size:11px;margin-top:3px">${escapeHtml(variant.detail)}</div>` : ''}</td>
+          <td>${escapeHtml(price)}</td>
+          <td>${escapeHtml(original)}</td>
+          <td><span class="${stockClass}">${escapeHtml(stockLabel)}</span></td>
+          <td class="mono">${escapeHtml(sellerLabel(row))}<br>${escapeHtml(row.shopId)} / ${escapeHtml(row.itemId)}</td>
+          <td><a href="${escapeAttribute(row.pageUrl)}" target="_blank" rel="noreferrer">Open product page</a></td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function renderDropList(drops) {
+  if (!drops.length) {
+    dropList.innerHTML = `<div class="muted">${escapeHtml(state.source)} A drop report appears after the same variant has been captured at least twice.</div>`;
+    return;
+  }
+
+  dropList.innerHTML = drops
+    .map((drop) => {
+      return `
+        <article class="report-card">
+          <strong>${escapeHtml(drop.title)}</strong>
+          <div class="report-meta">${escapeHtml(drop.variantName)} · ${escapeHtml(sellerLabel(drop))}</div>
+          <div class="report-meta">${escapeHtml(formatRmDisplay(afterVoucher(drop.previousPrice)))} → ${escapeHtml(formatRmDisplay(afterVoucher(drop.currentPrice)))} (down ${escapeHtml(formatRmDisplay(drop.dropAmount))})</div>
+          <div class="report-meta">Last ${escapeHtml(drop.previousGrabbedAt)} | Current ${escapeHtml(drop.grabbedAt)}</div>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
+}
+</script>
+    <script>
+(function () {
+  const OUR_KEY = 'd3-boss-our-price-v1';
+  const CSP_KEY = 'd3-boss-csp-price-v1'; // 成本价 cspPrice。预留利润: profit = ourPrice - cspPrice; profitMargin = profit / ourPrice（暂不显示利润栏）
+  const DEFAULT_VOUCHER_DISCOUNT = 5;
+
+  const css = document.createElement('style');
+  css.textContent = `
+  .boss-wrap{margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 4px 16px rgba(0,0,0,.06)}
+  .boss-wrap h2{margin:0;font-size:24px}
+  .boss-wrap h3{margin:18px 0 0;font-size:15px}
+  .boss-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .boss-legend button{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:13px;font-weight:600;color:#4f3920;cursor:pointer;font-family:inherit}
+  .boss-legend button:hover{border-color:var(--accent)}
+  .boss-legend button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .boss-legend button .cnt{display:inline-flex;min-width:18px;height:18px;padding:0 5px;align-items:center;justify-content:center;border-radius:999px;background:rgba(158,61,44,.12);color:#9e3d2c;font-size:11px;font-weight:800}
+  .boss-legend button.active .cnt{background:rgba(255,255,255,.28);color:#fff}
+  .boss-filter{margin-top:14px}
+  .boss-filter h3{margin:0 0 4px}
+  .gap-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:12px}
+  .gap-card{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#fff}
+  .gap-card .model{font-weight:700;font-size:15px}
+  .gap-card .big{font-size:21px;font-weight:800;margin-top:6px}
+  .gap-lower{color:#9e3d2c}
+  .gap-higher{color:#27401f}
+  .boss-table{width:100%;border-collapse:collapse;margin-top:12px;border:1px solid #e5d6bd;background:#fff}
+  .boss-table th,.boss-table td{padding:10px 12px;border-right:1px solid #eadcc8;border-bottom:1px solid #eadcc8;text-align:right;white-space:nowrap;vertical-align:middle}
+  .boss-table th:first-child,.boss-table td:first-child{text-align:left;white-space:normal}
+  .boss-table th{font-size:12px;color:#735632;text-transform:uppercase;letter-spacing:.03em;background:#f7efe1}
+  .boss-table tbody tr:hover{background:rgba(0,0,0,.03)}
+  .cheaper{color:#9e3d2c;font-weight:800}
+  .gap-up{color:#0f8b8d;font-weight:800}
+  .gap-down{color:#b23a2b;font-weight:800}
+  .gap-flat{color:#735632;font-weight:700}
+  .lowest{background:rgba(204,255,0,.85);border-radius:3px;padding:0 3px;box-decoration-break:clone;-webkit-box-decoration-break:clone;font-weight:700}
+  .ourprice-input{width:64px;padding:6px 6px;border:1px solid var(--accent);border-radius:8px;text-align:right;font:inherit}
+  .tier-line{font-size:12px;color:#735632;margin-top:3px;white-space:normal}
+  .tier-stack{display:inline-grid;grid-template-columns:52px 90px;column-gap:8px;align-items:center;line-height:1.9}
+  .tier-stack .tier-row{display:contents}
+  .tier-stack .tier-tag{font-size:11px;color:#9c8966;white-space:nowrap;text-align:right}
+  .price-num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:left}
+  .price-dash{display:flex;align-items:center;justify-content:center;color:#c4b8a6;font-variant-numeric:tabular-nums}
+  @media (min-width:768px){
+    /* 桌面：表格铺满容器(100%)。价格列收缩到内容、保持紧凑；MODEL 固定宽；
+       LOWEST COMPETITOR(倒数第二列)吃掉所有剩余宽度(相当于 1fr)，消除 GAP 后方大片空白；GAP 最小宽 */
+    .boss-table{width:100%}
+    .boss-table th:not(:first-child),.boss-table td:not(:first-child){width:1px;white-space:nowrap}
+    .boss-table th:first-child,.boss-table td:first-child{white-space:nowrap;width:1px}
+    .boss-table th:nth-last-child(2),.boss-table td:nth-last-child(2){width:auto;text-align:left;padding-left:28px}
+    .boss-table th:last-child,.boss-table td:last-child{padding-right:22px}
+  }
+  .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
+  `;
+  document.head.append(css);
+
+  const sec = document.createElement('section');
+  sec.className = 'boss-wrap';
+  sec.id = 'bossView';
+  const hero = document.querySelector('.hero');
+  if (hero) hero.insertAdjacentElement('afterend', sec);
+  else document.querySelector('main').prepend(sec);
+
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  let ourPrices = load(OUR_KEY, {});
+  let cspPrices = load(CSP_KEY, {}); // { [mk]: cspPrice:number } 成本价
+  let selectedRole = null; // null = 显示全部；'A'..'D' = 只看某对手比我们便宜的型号
+  window.D3_BOSS_SELECTED_ROLE = selectedRole;
+
+  const esc = (v) => (typeof escapeHtml === 'function'
+    ? escapeHtml(v)
+    : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+  const fmtMoney = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(2).replace(/\.00$/, '') : String(v);
+  };
+  const fmt = (v) => (v == null ? '—' : 'RM' + fmtMoney(v));
+  const afterVoucher = (v, discount = DEFAULT_VOUCHER_DISCOUNT) => {
+    if (v == null) return null;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Number((n - discount).toFixed(2)));
+  };
+  const phoneModel = (t) => {
+    let s = String(t).split('(')[0];
+    s = s.replace(/samsung|galaxy/ig, '').replace(/\s+/g, ' ').trim();
+    return s || String(t).slice(0, 18);
+  };
+  const isAmbiguousMixedModel = (text) => {
+    const s = String(text || '').toLowerCase();
+    if (!s) return false;
+    if (s.includes('mixed')) return true;
+    const families = new Set();
+    const patterns = [
+      /\ba0?6\b/g, /\ba0?7\b/g, /\ba17\b/g, /\ba26\b/g, /\ba36\b/g, /\ba37\b/g, /\ba56\b/g, /\ba57\b/g,
+      /\bs25\b/g, /\bs26\b/g, /\bs24\b/g, /\btab a11\b/g, /\btab s10\b/g, /\btab s11\b/g,
+      /\bz flip 7\b/g, /\bz fold 7\b/g, /\bwatch 8\b/g, /\bwatch ultra\b/g
+    ];
+    for (const pattern of patterns) {
+      const m = s.match(pattern);
+      if (m) families.add(pattern.source);
+    }
+    return families.size > 1;
+  };
+  const normalizeSingleModel = (text) => {
+    const s = String(text || '').trim();
+    if (!s || isAmbiguousMixedModel(s)) return null;
+    return s
+      .replace(/^Samsung Galaxy\s+/i, '')
+      .replace(/^Samsung\s+/i, '')
+      .replace(/\s+Mixed$/i, '')
+      .trim();
+  };
+  const capacityLabelOf = (n) => {
+    const text = String(n || '').trim();
+    const m = text.match(/(\d+)\+(\d+)(GB|TB)/i);
+    if (m) return `${m[2]}${m[3].toUpperCase()}`; // 型号配对只看存储、忽略 RAM：6+128GB → 128GB（用户要求，让我们 128GB 与对手 6+128GB 归到同一型号）
+    return text.replace(/\s+/g, '');
+  };
+  // 从标题/款式里提取干净型号键：优先按 variantName 判断机型，避免一个 listing 标题同时写 S26/S26+/Ultra 时全被误判成 Ultra。
+  const modelKeyOf = (title, variant, ourModel) => {
+    if (variant && typeof variant === 'object' && variant.model) {
+      return variant.model + (variant.capacity ? ` ${capacityLabelOf(variant.capacity)}` : '');
+    }
+    const variantName = typeof variant === 'object' ? variant.name : variant;
+    const variantHay = String(variantName).toLowerCase();
+    const titleHay = String(title).toLowerCase();
+    const hay = (String(title) + ' ' + String(variantName)).toLowerCase();
+    // 把任意写法的 S 系列(S25/S26/S27… + Ultra / Plus / +)归成统一型号，
+    // 让 s26+ / s26 + / s26plus / S26 Plus 全部落到 "S26+" 同一行
+    const normFamilyS = (str) => {
+      const s = String(str).toLowerCase();
+      const mm = s.match(/s\s*(2[0-9])/);
+      if (!mm) return null;
+      const num = mm[1];
+      if (s.indexOf('ultra') >= 0 || new RegExp('s\\s*' + num + '\\s*u\\b').test(s)) return 'S' + num + ' Ultra';
+      if (new RegExp('s\\s*' + num + '\\s*(?:\\+|plus)').test(s)) return 'S' + num + '+';
+      return 'S' + num;
+    };
+    let fam = normFamilyS(variantName);
+    if (!fam) fam = ourModel ? (normFamilyS(ourModel) || normalizeSingleModel(ourModel))
+                             : (normFamilyS(title) || normalizeSingleModel(title) || phoneModel(title));
+    if (!fam || isAmbiguousMixedModel(fam)) return null;
+    // 容量只从款式名抠，绝不读标题（标题列了所有容量，一读必乱 → 这就是 TAC 全变 1TB 的原因）
+    let stor = '';
+    const vn = String(variantName);
+    const m = vn.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i); // RAM+存储 → 取第二个(存储)，兼容 12+512 / 12GB+256GB
+    if (m) stor = m[2] + (m[3] ? m[3].toUpperCase() : 'GB');
+    else { const m2 = vn.match(/\b(\d+)\s*(GB|TB)\b/i); if (m2) stor = m2[1] + m2[2].toUpperCase(); }
+    return fam + (stor ? ' ' + stor : '');
+  };
+  const tierOf = (n) => {
+    if (n && typeof n === 'object' && n.tier) return String(n.tier).trim();
+    const p = String(n).split(',');
+    return p[p.length - 1].trim();
+  };
+  // 档位标签：Basic / Promo / SET A（保留原样显示）；排除 Gift Set 及其它
+  const canonTier = (n) => {
+    const t = tierOf(n).toLowerCase();
+    if (t.indexOf('gift set') >= 0) return null;
+    if (t.indexOf('demo') >= 0) return null;
+    if (t.indexOf('promo') >= 0) return 'Promo';
+    if (t.indexOf('basic') >= 0) return 'Basic';
+    if (t.indexOf('set a') >= 0) return 'SET A';
+    // 有些店没有 Basic/Promo 档，档位栏直接写容量(如 Urban Republic "12GB+256GB") → 当成标准价
+    if (/\d+\s*gb|\d+\s*\+\s*\d+|\d+\s*tb/i.test(t)) return 'Standard';
+    return null;
+  };
+
+  function latestPerShopItem(records) {
+    const m = new Map();
+    for (const r of records) {
+      const k = r.shopId + ':' + r.itemId;
+      if (!m.has(k)) m.set(k, r); // records 已按时间倒序，第一个即最新
+    }
+    return [...m.values()];
+  }
+
+  const ROLE_NAMES = {
+    A: 'Deal Direct',
+    B: 'Spray Gadget',
+    C: 'TAC Mobiles',
+    D: 'Urban Republic',
+  };
+  const SHOP_ROLES = {
+    '54618012': 'self',
+    '116917349': 'A',
+    '77792787': 'B',
+    '271823454': 'C',
+    '56447030': 'D',
+  };
+  const activeRoles = ['A', 'B', 'C', 'D'];
+  const TIER_ORDER = ['Basic', 'Promo', 'SET A']; // 三个配套固定顺序：基本款 / 优惠款 / 礼物款(SET A)
+  const roleName = (role) => ROLE_NAMES[role] || role;
+
+  function build() {
+    const records = (typeof state !== 'undefined' && state.records) || [];
+    const latest = latestPerShopItem(records);
+
+    const models = new Map();
+    const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价
+    const selfTiers = {}; // 我们自己的 Basic / Promo 分价
+    for (const r of latest) {
+      const role = SHOP_ROLES[String(r.shopId)];
+      if (!role) continue;
+      for (const v of r.variants) {
+        const rowForFilters = {
+          title: r.title,
+          sellerName: r.sellerName,
+          shopId: r.shopId,
+          itemId: r.itemId,
+          color: v.color || '',
+          capacity: v.capacity || '',
+          tier: v.tier || '',
+          variantName: v.name || '',
+          model: v.model || '',
+        };
+        // self(我们公司)是「我们的价」基准列，切到任何对手 tab 都要保留 → 豁免 bossRole 过滤；仍受搜索/系列/型号筛选
+        if (typeof matchesCurrentFilters === 'function' && !matchesCurrentFilters(rowForFilters, role === 'self' ? { includeBossRole: false } : {})) continue;
+        if (v.currentPrice == null) continue;
+        const effectivePrice = afterVoucher(v.currentPrice);
+        if (effectivePrice == null) continue;
+        const ct = canonTier(v);
+        if (!ct) continue; // 只统计 Promo / Basic
+        const mk = modelKeyOf(r.title, v, (window.D3_ITEM_MODEL || {})[String(r.itemId)]);
+        if (!mk) continue;
+        if (!models.has(mk)) models.set(mk, {});
+        if (role === 'self') {
+          selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
+          if (!selfTiers[mk]) selfTiers[mk] = {};
+          selfTiers[mk][ct] = Math.min(selfTiers[mk][ct] == null ? Infinity : selfTiers[mk][ct], effectivePrice);
+          continue;
+        }
+        const byRole = models.get(mk);
+        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {} };
+        byRole[role].min = Math.min(byRole[role].min, effectivePrice);
+        byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+      }
+    }
+    return { models, selfPrices, selfTiers };
+  }
+
+  function bossRender() {
+    const { models, selfPrices, selfTiers } = build();
+    document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
+
+    const modelKeys = [...models.keys()].sort();
+
+    const gaps = [];
+    for (const mk of modelKeys) {
+      const byRole = models.get(mk);
+      let best = null;
+      for (const L of activeRoles) {
+        if (byRole[L] && byRole[L].min < (best ? best.price : Infinity)) best = { role: L, price: byRole[L].min };
+      }
+      if (!best) continue;
+      const manual = ourPrices[mk];
+      const our = manual != null ? manual : (selfPrices[mk] != null ? selfPrices[mk] : null);
+      const diff = our != null ? best.price - our : null;
+      if (diff == null || diff >= 0) continue;
+      gaps.push({ mk, best, our, diff });
+    }
+    gaps.sort((a, b) => (a.diff == null ? 1e9 : a.diff) - (b.diff == null ? 1e9 : b.diff));
+    const gapHtml = gaps.map((g) => {
+      const line = `<div class="big gap-lower">-RM${fmtMoney(Math.abs(g.diff))}</div>`;
+      return `<div class="gap-card"><div class="model">${esc(g.mk)}</div><div class="tier-line">Lowest competitor: ${esc(roleName(g.best.role))} ${fmt(g.best.price)}</div>${line}</div>`;
+    }).join('');
+
+    // 每个对手在哪些型号上比我们便宜（给可点按钮 + 明细面板用）
+    const cheaperByRole = {};
+    for (const L of activeRoles) cheaperByRole[L] = [];
+    for (const mk of modelKeys) {
+      const byRole = models.get(mk);
+      const manual = ourPrices[mk];
+      const our = manual != null ? manual : (selfPrices[mk] != null ? selfPrices[mk] : null);
+      if (our == null) continue;
+      for (const L of activeRoles) {
+        const v = byRole[L] ? byRole[L].min : null;
+        if (v != null && v < our) cheaperByRole[L].push({ mk, comp: v, our, save: our - v });
+      }
+    }
+    for (const L of activeRoles) cheaperByRole[L].sort((a, b) => b.save - a.save);
+
+    const legend = `<button data-role="all" class="${selectedRole == null ? 'active' : ''}">Us — show all</button>` +
+      activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('');
+
+    let filterHtml = '';
+    if (selectedRole) {
+      const list = cheaperByRole[selectedRole];
+      const name = esc(roleName(selectedRole));
+      if (!list.length) {
+        filterHtml = `<div class="boss-filter"><div class="muted">${name} is not cheaper than us on any model right now. 🎉</div></div>`;
+      } else {
+        const cards = list.map((it) => `<div class="gap-card"><div class="model">${esc(it.mk)}</div><div class="tier-line">${name} ${fmt(it.comp)} · us ${fmt(it.our)}</div><div class="big gap-lower">-RM${fmtMoney(it.save)}</div></div>`).join('');
+        filterHtml = `<div class="boss-filter"><h3>${name} is cheaper than us on ${list.length} model${list.length > 1 ? 's' : ''}</h3><div class="gap-strip">${cards}</div></div>`;
+      }
+    }
+
+    const visibleRoles = selectedRole ? [selectedRole] : activeRoles;
+    const displayedModelKeys = selectedRole
+      ? modelKeys.filter((mk) => {
+          const byRole = models.get(mk);
+          return byRole[selectedRole] && byRole[selectedRole].min != null;
+        })
+      : modelKeys;
+
+    const head = `<tr><th>Model</th><th>CSP</th><th>Our price</th>${visibleRoles.map((L) => `<th>${esc(roleName(L))}</th>`).join('')}<th>👑 Lowest competitor</th><th>Gap</th></tr>`;
+    const body = displayedModelKeys.map((mk) => {
+      const byRole = models.get(mk);
+      const manual = ourPrices[mk];
+      const our = manual != null ? manual : (selfPrices[mk] != null ? selfPrices[mk] : null);
+      let best = null;
+      for (const L of activeRoles) {
+        if (byRole[L] && byRole[L].min < (best ? best.price : Infinity)) best = { role: L, price: byRole[L].min };
+      }
+      const cells = visibleRoles.map((L) => {
+        const rd = byRole[L];
+        if (!rd || rd.min == null || rd.min === Infinity) return '<td class="empty-cell">—</td>';
+        const isLowestComp = best && best.role === L; // 该对手是全场最低对手
+        const tiers = rd.tiers || {};
+        const extraKeys = Object.keys(tiers).filter((k) => !TIER_ORDER.includes(k)); // 如 Standard 等非标准档也要显示
+        const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
+          const val = tiers[k];
+          if (val == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-dash">—</span></div>`;
+          const cheaper = our != null && val < our;
+          const hi = cheaper && isLowestComp && val === rd.min; // 只有低过我们时才高亮
+          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num${hi ? ' lowest' : ''}${cheaper ? ' cheaper' : ''}">${fmt(val)}</span></div>`;
+        }).join('');
+        return `<td><div class="tier-stack">${rows}</div></td>`;
+      }).join('');
+      const diff = best && our != null ? best.price - our : null;
+      const diffHtml = diff == null
+        ? '—'
+        : (diff < 0
+          ? `<span class="gap-down">-RM${fmtMoney(Math.abs(diff))}</span>`
+          : '—');
+
+      // 我们的价：有自家数据就显示 Basic/Promo 两个价，否则给个填价框
+      const st = selfTiers[mk];
+      let ourCell;
+      if (st && (st['Basic'] != null || st['Promo'] != null || st['SET A'] != null)) {
+        const extraKeys = Object.keys(st).filter((k) => !TIER_ORDER.includes(k));
+        const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
+          if (st[k] == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-dash">—</span></div>`;
+          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span></div>`;
+        }).join('');
+        ourCell = `<div class="tier-stack">${rows}</div>`;
+      } else {
+        ourCell = `<input class="ourprice-input" data-model="${esc(mk)}" type="number" inputmode="numeric" value="${manual == null ? '' : manual}" placeholder="Enter price">`;
+      }
+
+      const csp = cspPrices[mk];
+      const cspCell = `<input class="ourprice-input csp-input" data-csp="${esc(mk)}" type="number" inputmode="numeric" value="${csp == null ? '' : csp}" placeholder="Cost">`;
+
+      return `<tr><td><strong>${esc(mk)}</strong></td>` +
+        `<td>${cspCell}</td>` +
+        `<td>${ourCell}</td>` +
+        cells +
+        `<td class="${best ? '' : 'empty-cell'}">${best ? esc(roleName(best.role)) + ' ' + fmt(best.price) : '—'}</td>` +
+        `<td class="${diff == null ? 'empty-cell' : ''}">${diffHtml}</td></tr>`;
+    }).join('');
+
+    sec.innerHTML =
+      '<h2>Boss comparison view</h2>' +
+      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, TAC Mobiles, and Urban Republic. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
+      `<div class="boss-legend">${legend}</div>` +
+      filterHtml +
+      (gaps.length ? '<h3>Lowest competitor vs our price</h3>' + `<div class="gap-strip">${gapHtml}</div>` : '') +
+      `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
+      `<div class="boss-legend">${legend}</div>` +
+      `<div style="overflow-x:auto"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    sec.querySelectorAll('input[data-model]').forEach((el) => { el.onchange = () => {
+      const mk = el.dataset.model;
+      const v = Number(el.value);
+      if (el.value === '' || !Number.isFinite(v)) delete ourPrices[mk]; else ourPrices[mk] = v;
+      save(OUR_KEY, ourPrices); bossRender();
+    }; });
+    sec.querySelectorAll('input[data-csp]').forEach((el) => { el.onchange = () => {
+      const mk = el.dataset.csp;
+      const v = Number(el.value);
+      if (el.value === '' || !Number.isFinite(v)) delete cspPrices[mk]; else cspPrices[mk] = v;
+      save(CSP_KEY, cspPrices); // 暂不 bossRender：CSP 还不影响显示，避免输入时重建丢焦点
+    }; });
+    sec.querySelectorAll('.boss-legend button').forEach((btn) => { btn.onclick = () => {
+      const r = btn.dataset.role;
+      selectedRole = (r === 'all' || r === selectedRole) ? null : r;
+      window.D3_BOSS_SELECTED_ROLE = selectedRole;
+      if (typeof render === 'function') render();
+      else bossRender();
+    }; });
+  }
+
+  if (typeof window.render === 'function') {
+    const orig = window.render;
+    window.render = function () { orig.apply(this, arguments); bossRender(); };
+  }
+  bossRender();
+})();
+
+    </script>
+
+    <script>
+    (function(){
+      var P='https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3';
+      // A) 处理书签传来的上传（#upload=...）：此页在 Vercel，可正常写 Pantry
+      var mm=(location.hash||'').match(/upload=([^&]+)/);
+      if(mm){
+        var rec;try{rec=JSON.parse(decodeURIComponent(mm[1]));}catch(e){document.body.innerHTML='<div style="font:18px sans-serif;padding:40px;color:#d1453b">Upload data parse failed</div>';return;}
+        fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():{records:[]};}).then(function(cur){
+          if(!cur||!Array.isArray(cur.records))cur={records:[]};
+          cur.records.push(rec);
+          return fetch(P,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cur)});
+        }).then(function(){
+          history.replaceState(null,'','/');
+          document.body.innerHTML='<div style="font:20px sans-serif;padding:48px;text-align:center;color:#1f2329">✅ Uploaded to dashboard<br><br>'+((rec.title||'').slice(0,40))+'<br>'+((rec.variants||[]).length)+' variants<br><br><span style="color:#888;font-size:15px">This tab will close automatically…</span></div>';
+          setTimeout(function(){window.close();},1500);
+        }).catch(function(e){document.body.innerHTML='<div style="font:18px sans-serif;padding:40px;color:#d1453b">Upload failed: '+e.message+'</div>';});
+        return; // 上传模式不再加载看板
+      }
+      // B) 正常打开：从云端读 + 每分钟自动刷新
+      function pull(){return fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(p){var arr=(p&&Array.isArray(p.records))?p.records:[];state.records=sortRecords(arr.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cloud (auto-refresh every minute).';render();});}
+      pull().catch(function(e){state.records=state.records||[];state.source='Cloud load failed. Latest cloud data unavailable. '+e.message;render();});
+      setInterval(function(){pull().catch(function(){});},60000);
+      // C) 在线导入(拖/选/粘贴 JSON)时，自动同步到云端 → 老板网址实时更新
+      if(typeof window.mergeIncoming==='function'){
+        var _mi=window.mergeIncoming;
+        window.mergeIncoming=function(a,b){
+          _mi(a,b);
+          fetch(P,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:state.records})})
+            .then(function(){state.source='Import completed and synced to cloud. The boss link is now updated.';render();})
+            .catch(function(e){state.source='Import succeeded, but cloud sync failed: '+e.message;render();});
+        };
+      }
+      // D) 隐藏导入/导出/统计区（老板看干净版），右下角留「⚙ 数据管理」给 Sarah 用
+      var ctrl=document.querySelector('.controls');
+      if(ctrl){
+        ctrl.style.display='none';
+        var tg=document.createElement('button');
+        tg.textContent='⚙ Data tools';
+        tg.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99999;padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;font:13px sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.15)';
+        tg.onclick=function(){var open=ctrl.style.display==='none';ctrl.style.display=open?'':'none';if(open)ctrl.scrollIntoView({behavior:'smooth'});};
+        document.body.appendChild(tg);
+      }
+    })();
+    </script>
+    <script>
+(function () {
+  // 💰 利润 / 平台对比页 —— 公式逆向自 Market Price List.xlsx (Samsung sheet)，仅手机
+  const PROFIT_MODELS = [
+    { model: "A06 4+128 4G (A065)", csp: 382, adsPct: 0.02 },
+    { model: "A06 6+128 5G (A066)", csp: 584, adsPct: 0.02 },
+    { model: "A07 8+256 4g (A075)", csp: 635, adsPct: 0.03 },
+    { model: "A07 8+256 5g (A076)", csp: 769, adsPct: 0.03 },
+    { model: "A16 8+256 4G (A165)", csp: 639, adsPct: 0.03 },
+    { model: "A16 8+256 5G (A166)", csp: 819, adsPct: 0.03 },
+    { model: "A17 8+256 4g (A175)", csp: 759, adsPct: 0.03 },
+    { model: "A17 8+256 5g (A176)", csp: 895, adsPct: 0.03 },
+    { model: "A26 5G 8+256 (A266)", csp: 1199, adsPct: 0.03 },
+    { model: "A36 5G 12+256 (A366)", csp: 1250, adsPct: 0.03 },
+    { model: "A37 5G 12+256 (A376)", csp: 1649, adsPct: 0.03 },
+    { model: "A56 5G 12+256 (A566)", csp: 1684, adsPct: 0.03 },
+    { model: "A57 5G 12+256 (A576)", csp: 1889, adsPct: 0.03 },
+    { model: "A57 5G 12+512 (A576)", csp: 1949, adsPct: 0.03 },
+    { model: "S25 FE 8+256 (S731)", csp: 3057, adsPct: 0.03 },
+    { model: "S25 FE 8+256 (S731) - White", csp: 2809, adsPct: 0.03 },
+    { model: "S25 FE 8+512 (S731)", csp: 3219, adsPct: 0.03 },
+    { model: "S25 12+256 (S931)", csp: 3599, adsPct: 0.03 },
+    { model: "S25 12+512 (S931)", csp: 3684, adsPct: 0.03 },
+    { model: "S25+ 12+256 (S936)", csp: 4084, adsPct: 0.03 },
+    { model: "S25+ 12+512 (S936)", csp: 4140, adsPct: 0.03 },
+    { model: "S25 ULTRA 12+256 (S938)", csp: 4349, adsPct: 0.03 },
+    { model: "S25 ULTRA 12+512 (S938)", csp: 4849, adsPct: 0.03 },
+    { model: "S25 ULTRA 12+1TB (S938)", csp: 6449, adsPct: 0.03 },
+    { model: "S26 12+256 (S942)", csp: 3969, adsPct: 0.03 },
+    { model: "S26 12+512 (S942)", csp: 4189, adsPct: 0.03 },
+    { model: "S26+ 12+256 (S947)", csp: 3689, adsPct: 0.03 },
+    { model: "S26+ 12+512 (S947)", csp: 4079, adsPct: 0.03 },
+    { model: "S26 ULTRA 12+256 (S948)", csp: 5539, adsPct: 0.03 },
+    { model: "S26 ULTRA 12+512 (S948)", csp: 5869, adsPct: 0.03 },
+    { model: "S26 ULTRA 16+1TB (S948)", csp: 6989, adsPct: 0.03 },
+  ];
+  const COM_S = 0.1026, COM_L = 0.1836, SST = 1.08; // Shopee/Lazada 佣金 + 8% SST
+  const PCSP_K = 'd3-profit-csp-v1', PCSPL_K = 'd3-profit-cspl-v1';
+  const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  let cspO = load(PCSP_K, {}), cspLO = load(PCSPL_K, {});
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fmt = (v) => (v == null || !isFinite(v)) ? '—' : 'RM' + Number(v).toFixed(2).replace(/\.00$/, '');
+  const ccb = (csp, rate) => Math.min(csp * rate * SST, 108);                                   // CCB 封顶 RM108
+  const takeBackS = (csp, adsPct, dday) => csp - csp * COM_S - ccb(csp, dday ? 0.075 : 0.055) - csp * adsPct * SST;
+  const takeBackL = (cspL) => cspL * (1 - COM_L);
+  const suggestCspL = (csp, adsPct) => csp + csp * 0.0756 - ccb(csp, 0.055) - csp * adsPct * SST; // J 列建议价
+
+  // 利润表借用 boss-table 的 Excel 风格，但取消「倒数第二列吃剩余」那条规则
+  const stl = document.createElement('style');
+  stl.textContent = '@media(min-width:768px){.profit-table th:nth-last-child(2),.profit-table td:nth-last-child(2){width:1px;text-align:right;padding-left:12px}}';
+  document.head.appendChild(stl);
+
+  const sec = document.createElement('section');
+  sec.id = 'profitView';
+  sec.className = 'table-wrap';
+  const main = document.querySelector('main');
+  if (main) main.appendChild(sec);
+
+  function render() {
+    const rows = PROFIT_MODELS.map((m) => {
+      const csp = cspO[m.model] != null ? cspO[m.model] : m.csp;
+      const cspL = cspLO[m.model] != null ? cspLO[m.model] : Math.round(suggestCspL(csp, m.adsPct)); // 默认建议价，可手改
+      const tbS = takeBackS(csp, m.adsPct, false);
+      const tbSd = takeBackS(csp, m.adsPct, true);
+      const tbL = takeBackL(cspL);
+      const diff = tbL - tbS; // 正=Lazada 实拿更多
+      const winner = Math.abs(diff) < 0.005 ? '<span class="muted">同</span>'
+        : (diff > 0 ? `<span class="gap-up">Lazada +${fmt(diff)}</span>` : `<span class="gap-down">Shopee +${fmt(-diff)}</span>`);
+      return '<tr>' +
+        `<td><strong>${esc(m.model)}</strong></td>` +
+        `<td><input class="ourprice-input" data-pcsp="${esc(m.model)}" type="number" inputmode="decimal" value="${csp}"></td>` +
+        `<td><input class="ourprice-input" data-pcspl="${esc(m.model)}" type="number" inputmode="decimal" value="${cspL}"></td>` +
+        `<td class="price-num">${fmt(tbS)}</td>` +
+        `<td class="price-num">${fmt(tbSd)}</td>` +
+        `<td class="price-num">${fmt(tbL)}</td>` +
+        `<td>${winner}</td>` +
+        '</tr>';
+    }).join('');
+    sec.innerHTML =
+      '<h2>💰 利润 / 平台对比</h2>' +
+      '<p class="muted" style="margin-top:6px">填 Shopee 标价(CSP) 和 Lazada 标价(CSP·L)，自动算扣完 佣金+CCB+广告费 后实拿，比哪个平台更赚。费率：Shopee 10.26% / Lazada 18.36% / CCB=标价×5.5%(平日) 或 7.5%(D-Day) ×1.08SST 封顶RM108 / Ads 3%×1.08(A06系列2%)。CSP·L 默认是建议价(可手改)。数据源 Market Price List.xlsx。注意：这是「平台实拿」对比，不含进货成本，不是净利润。</p>' +
+      '<div style="overflow-x:auto"><table class="boss-table profit-table"><thead><tr>' +
+      '<th>Model</th><th>CSP (S)</th><th>CSP (L)</th><th>Shopee 实拿 平日</th><th>Shopee 实拿 D-Day</th><th>Lazada 实拿</th><th>👑 更赚平台</th>' +
+      `</tr></thead><tbody>${rows}</tbody></table></div>`;
+    sec.querySelectorAll('input[data-pcsp]').forEach((el) => { el.onchange = () => {
+      const m = el.dataset.pcsp, v = Number(el.value);
+      if (el.value === '' || !isFinite(v)) delete cspO[m]; else cspO[m] = v;
+      save(PCSP_K, cspO); render();
+    }; });
+    sec.querySelectorAll('input[data-pcspl]').forEach((el) => { el.onchange = () => {
+      const m = el.dataset.pcspl, v = Number(el.value);
+      if (el.value === '' || !isFinite(v)) delete cspLO[m]; else cspLO[m] = v;
+      save(PCSPL_K, cspLO); render();
+    }; });
+  }
+  render();
+})();
+    </script>
+  </body>
+</html>

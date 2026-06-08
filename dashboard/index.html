@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>D3 Price Console</title>
+    <style>
+      :root {
+        --bg: #f6efe3;
+        --panel: #fffaf3;
+        --ink: #231b11;
+        --line: #d7c19a;
+        --accent: #9a6b16;
+        --accent-2: #5c7c4f;
+        --danger: #9e3d2c;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font: 14px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(154, 107, 22, 0.14), transparent 28%),
+          radial-gradient(circle at top right, rgba(92, 124, 79, 0.14), transparent 24%),
+          linear-gradient(180deg, #fbf6ee, var(--bg));
+      }
+
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 32px;
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .hero {
+        background: rgba(255, 250, 243, 0.88);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(87, 57, 11, 0.08);
+      }
+
+      .hero small {
+        display: inline-block;
+        margin-top: 8px;
+        color: #735632;
+      }
+
+      .controls,
+      .report-wrap,
+      .table-wrap {
+        margin-top: 18px;
+        background: rgba(255, 250, 243, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(87, 57, 11, 0.06);
+      }
+
+      .controls-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .dropzone {
+        border: 2px dashed var(--line);
+        border-radius: 16px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.65);
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 24px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button,
+      .file-label {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 10px 14px;
+        font: inherit;
+        cursor: pointer;
+        color: white;
+        background: var(--accent);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      button.secondary,
+      .file-label.secondary {
+        background: white;
+        color: var(--ink);
+        border-color: var(--line);
+      }
+
+      button.danger {
+        background: var(--danger);
+      }
+
+      input[type="file"] {
+        display: none;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 130px;
+        resize: vertical;
+        margin-top: 10px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        padding: 12px;
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .filters input {
+        min-width: 220px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.84);
+        font: inherit;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 10px 8px;
+        border-bottom: 1px solid rgba(215, 193, 154, 0.7);
+      }
+
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #735632;
+      }
+
+      td.mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .muted {
+        color: #735632;
+      }
+
+      .report-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .competitor-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .competitor-card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.76);
+      }
+
+      .competitor-card h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .competitor-meta {
+        margin-top: 4px;
+        color: #735632;
+        font-size: 13px;
+      }
+
+      .model-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .model-item {
+        border-top: 1px solid rgba(215, 193, 154, 0.6);
+        padding-top: 10px;
+      }
+
+      .model-item strong {
+        display: block;
+      }
+
+      .variant-list {
+        display: grid;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .variant-row {
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(246, 239, 227, 0.85);
+      }
+
+      .variant-row.up {
+        background: rgba(158, 61, 44, 0.10);
+      }
+
+      .variant-row.down {
+        background: rgba(92, 124, 79, 0.12);
+      }
+
+      .variant-row.new {
+        background: rgba(154, 107, 22, 0.10);
+      }
+
+      .report-card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .report-card strong {
+        font-size: 16px;
+      }
+
+      .report-meta {
+        margin-top: 6px;
+        color: #735632;
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(92, 124, 79, 0.14);
+        color: #27401f;
+      }
+
+      .pill.out {
+        background: rgba(158, 61, 44, 0.12);
+        color: #7b2416;
+      }
+
+      @media (max-width: 720px) {
+        h1 {
+          font-size: 26px;
+        }
+
+        .table-wrap {
+          overflow-x: auto;
+        }
+
+        table {
+          min-width: 900px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <h1>D3 Price Console</h1>
+        <p>Drop in the JSON exported by the bookmarklet to monitor competitor phone variants in one place, then export a consolidated CSV for your internal system or Google Sheet.</p>
+        <small>This page loads `/data/records.json` by default and also supports manual JSON imports. It does not access Shopee directly.</small>
+      </section>
+
+      <section class="controls">
+        <div class="actions">
+          <label class="file-label" for="fileInput">Import JSON files</label>
+          <input id="fileInput" type="file" accept=".json,application/json" multiple>
+          <button id="exportCsv">Export summary CSV</button>
+          <button id="exportJson" class="secondary">Export summary JSON</button>
+          <button id="clearAll" class="danger">Clear current data</button>
+        </div>
+
+        <div class="controls-grid">
+          <div class="dropzone" id="dropzone">
+            <strong>Drag and drop import</strong>
+            <p class="muted">Drop multiple `d3-shopee-price-*.json` files here at once.</p>
+          </div>
+          <div>
+            <strong>Paste JSON</strong>
+            <textarea id="pasteInput" placeholder='Supports a single record object or an array like [ {...}, {...} ]'></textarea>
+            <div class="actions" style="margin-top:10px">
+              <button id="importPaste" class="secondary">Import pasted JSON</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <span class="muted">Products</span>
+            <strong id="metricProducts">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Variant rows</span>
+            <strong id="metricVariants">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Shops</span>
+            <strong id="metricShops">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Latest capture</span>
+            <strong id="metricLatest" style="font-size:16px">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="report-wrap">
+        <h2 style="margin:0">Price drop report</h2>
+        <p class="muted" style="margin-top:6px">Compare the latest two captures for the same `shop_id + item_id + variant` and list the price drops.</p>
+        <div class="metrics">
+          <div class="metric">
+            <span class="muted">Dropped variants</span>
+            <strong id="metricDrops">0</strong>
+          </div>
+          <div class="metric">
+            <span class="muted">Largest drop</span>
+            <strong id="metricMaxDrop">-</strong>
+          </div>
+        </div>
+        <div id="dropList" class="report-list"></div>
+      </section>
+
+      <section class="table-wrap">
+        <div class="filters">
+          <input id="searchInput" type="search" placeholder="Search product / shop / variant / ID">
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Captured at</th>
+              <th>Product</th>
+              <th>Variant</th>
+              <th>Current price</th>
+              <th>Original price</th>
+              <th>Stock</th>
+              <th>Shop / IDs</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

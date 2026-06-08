@@ -1,0 +1,24 @@
+{
+  "name": "d3-price-monitor",
+  "version": "0.1.0",
+  "description": "竞争对手价格监控 — 爬虾皮马来西亚 → Google Sheet → Telegram 提醒",
+  "type": "module",
+  "scripts": {
+    "build:bookmarklet": "node src/build-bookmarklet.mjs",
+    "hermes:start": "node src/hermes.mjs",
+    "hermes:once": "node src/runOnce.mjs",
+    "import:data": "node src/import-records.mjs",
+    "report:drops": "node src/report-drops.mjs",
+    "shopee:login": "node src/shopee-login.mjs",
+    "serve": "node src/server.mjs",
+    "telegram:bot": "node src/telegram-bot.mjs",
+    "scrape": "node src/scraper.mjs",
+    "run-once": "node src/runOnce.mjs"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.3",
+    "playwright": "^1.49.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

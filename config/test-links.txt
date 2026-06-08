@@ -1,0 +1,3 @@
+# 一行一个虾皮马来西亚商品链接，# 开头的行会被忽略。
+# 放 10 个对手商品链接进来，然后跑：node src/test-scraperapi.mjs
+https://shopee.com.my/Samsung-S26-(12-256GB-12-512GB)-6.7-2x-Amoled-Display-l-Exynos-2600-l-4300mAH-Battery-l-Galaxy-Al-i.77792787.49707960484

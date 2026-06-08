@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.save
+*.local
+config/products.csv
+out/
+*.log
+.DS_Store
+data/*.bak-*
+
+data/records.json
+d3-price/data/records.json
+config/*-backup.csv
+config/product-master.txt
