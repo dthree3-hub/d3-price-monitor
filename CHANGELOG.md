@@ -6,6 +6,22 @@
 
 ## 2026-06-09
 
+### 修复批次卡死（被反爬拦时跳过）
+- **文件**：`src/runOnce.mjs`、`src/lib-hermes.mjs`
+- **改了什么**：batch state 加 `retries` 计数；一批抓到 0 条时最多重试 2 次，超过就强制 cursor 前进跳过该批（被拦链接下一整圈再试）。
+- **为什么**：第 8 批两个 TAC 平板链接一直返回 Shopee 反爬错误码 `90309999`，旧逻辑「0 条就保留 cursor 重跑」导致整个轮换永久卡在第 8 批。
+- **commit**：`1d7653a`
+
+### Price drop report：丢档数 → 最新更新时间(MYT)
+- **文件**：`d3-price/index.html`
+- **改了什么**：「Dropped variants」指标换成「Last updated (Malaysia)」，显示 Hermes 最近抓取的马来西亚时间(UTC+8)，新增 `toMalaysiaTime()`。
+- **commit**：`3ae63a6`
+
+### 平板 WiFi/LTE + 斜线显示 + 分类筛选位置
+- **文件**：`src/variant-parser.mjs`、`d3-price/index.html`
+- **改了什么**：解析器给平板(A11/S10/S11/Tab)补 WiFi/LTE/5G 网络，WiFi/LTE 款分开；前端 `displayMk()` 在存储前加斜线（`A26 5G / 256GB`）；Category 筛选移到「Full comparison table」标题上方。
+- **commit**：`f324ee3`
+
 ### 老板视图：分类筛选 + 荧光黄规则修正
 - **文件**：`d3-price/index.html`
 - **改了什么**：① 荧光黄改成「任何对手价低过我们(我们最低价)就高亮」（原本只高亮全场最低对手）；② 老板对比表加「分类 → 型号」级联下拉框（平板 A11/S10/S11/Tab 与手机分开归类）；③ 顶部说明文字同步更新。
