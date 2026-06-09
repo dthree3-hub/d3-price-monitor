@@ -2612,6 +2612,7 @@ function escapeAttribute(value) {
   window.D3_BOSS_SELECTED_ROLE = selectedRole;
   let bossCat = '';   // 分类筛选：'' = 全部；如 'Galaxy A' / 'Tablet' / 'Buds'
   let bossModel = ''; // 该分类下选中的具体型号：'' = 全部
+  let onlyCheaper = false; // true = 只显示有对手低过我们的型号
 
   // 分类判定（平板/手机要分开：A11=平板, A06/A16/A17=手机; S10/S11=平板, S25/S26=手机）
   function bossCategory(mk) {
@@ -2912,7 +2913,8 @@ function escapeAttribute(value) {
     for (const L of activeRoles) cheaperByRole[L].sort((a, b) => b.save - a.save);
 
     const legend = `<button data-role="all" class="${selectedRole == null ? 'active' : ''}">Us — show all</button>` +
-      activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('');
+      activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('') +
+      `<button data-cheaper="1" class="${onlyCheaper ? 'active' : ''}" style="border-color:#9e3d2c;color:${onlyCheaper ? '#fff' : '#9e3d2c'}${onlyCheaper ? ';background:#9e3d2c' : ''}">⚠ 只看低过我们 <span class="cnt">${gaps.length}</span></button>`;
 
     let filterHtml = '';
     if (selectedRole) {
@@ -2936,6 +2938,8 @@ function escapeAttribute(value) {
     // 分类 / 型号 筛选
     if (bossCat) displayedModelKeys = displayedModelKeys.filter((mk) => bossCategory(mk) === bossCat);
     if (bossModel) displayedModelKeys = displayedModelKeys.filter((mk) => mk === bossModel);
+    // 只看低过我们的（gaps 已是「对手最低价 < 我们价」的型号集）
+    if (onlyCheaper) { const cs = new Set(gaps.map((g) => g.mk)); displayedModelKeys = displayedModelKeys.filter((mk) => cs.has(mk)); }
 
     const head = `<tr><th style="width:180px">Model</th><th style="width:170px">Our price</th>${visibleRoles.map((L) => `<th style="width:170px">${esc(roleName(L))}</th>`).join('')}<th style="width:180px">👑 Lowest competitor</th><th style="width:110px">Gap</th><th style="width:110px">Take back</th></tr>`;
     const body = displayedModelKeys.map((mk) => {
@@ -3094,12 +3098,16 @@ function escapeAttribute(value) {
         if (detailRow) detailRow.classList.toggle('src-row-open');
       };
     });
-    sec.querySelectorAll('.boss-legend button').forEach((btn) => { btn.onclick = () => {
+    sec.querySelectorAll('.boss-legend button[data-role]').forEach((btn) => { btn.onclick = () => {
       const r = btn.dataset.role;
       selectedRole = (r === 'all' || r === selectedRole) ? null : r;
       window.D3_BOSS_SELECTED_ROLE = selectedRole;
       if (typeof render === 'function') render();
       else bossRender();
+    }; });
+    sec.querySelectorAll('.boss-legend button[data-cheaper]').forEach((btn) => { btn.onclick = () => {
+      onlyCheaper = !onlyCheaper;
+      bossRender();
     }; });
   }
 
