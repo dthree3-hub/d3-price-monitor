@@ -48,8 +48,8 @@ https://d3-price-seven.vercel.app
 
 | 负责方 | 范围 |
 |--------|------|
-| **Claude** | `d3-price/index.html`（全部）；git push 到 GitHub；Vercel deploy |
-| **Codex** | `src/` 抓取逻辑、CDP、PowerShell、`C:\D3` Windows 侧；Hermes 可靠性；Pantry 写入；Telegram bot |
+| **Claude** | `d3-price/index.html`（全部）；`d3-price/api/data.js`；`d3-worker/`（Cloudflare Worker）；git push 到 GitHub；Vercel deploy |
+| **Codex** | `src/` 抓取逻辑、CDP、PowerShell、`C:\D3` Windows 侧；Hermes 可靠性；云端同步写入；Telegram bot |
 
 > ❌ Claude 不动 `src/`。
 > ❌ Codex 不动 `d3-price/index.html`。
@@ -90,33 +90,87 @@ https://d3-price-seven.vercel.app
 
 ## 7. 数据源
 
-**当前线上数据源：JSONBin.io（2026-06-09 从 Pantry 迁移）**
+**当前线上数据源：Cloudflare D1 + Workers（2026-06-09 从 JSONBin 迁移）**
 
-### 前端读取（Claude 已改好）
+> ~~Pantry~~（HTTP 522 永久挂掉）→ ~~JSONBin~~（Free Plan 100KB 限制，938KB payload 触发 403）→ **Cloudflare D1**（无大小限制，SQLite 结构化存储）
+
+### 架构图
+
+```
+Windows (Hermes)
+  └─ POST /api/sync + X-D3-Secret header
+       └─ Cloudflare Worker (d3-price-worker.dthree.workers.dev)
+            ├─ UPSERT → D1 (variant_prices table)
+            └─ INSERT → D1 (price_history table, 仅价格变动时)
+
+Browser (Boss)
+  └─ GET https://d3-price-seven.vercel.app/api/data  (Vercel proxy)
+       └─ GET /api/records  (Cloudflare Worker)
+            └─ SELECT → D1 variant_prices
+```
+
+### Cloudflare D1 数据库
+
+| 项目 | 值 |
+|------|-----|
+| Database Name | `d3-price-db` |
+| Database ID | `2637fd89-4284-436d-b076-a6c3a530664f` |
+| Worker Name | `d3-price-worker` |
+| Worker URL | `https://d3-price-worker.dthree.workers.dev` |
+
+### Worker Endpoints
+
+| Method | Path | 说明 | 权限 |
+|--------|------|------|------|
+| GET | `/api/records` | 返回 `{records:[...]}` 兼容前端格式 | 公开 |
+| POST | `/api/sync` | Hermes 写入，upsert variant_prices | `X-D3-Secret` header |
+| GET | `/api/history?model=S25+256GB` | 价格历史，最近 500 条 | 公开 |
+
+### 前端读取（Vercel proxy）
 ```
 GET https://d3-price-seven.vercel.app/api/data
 ```
-- 前端通过 Vercel API proxy 读取，Master Key 存在 Vercel env var `JSONBIN_KEY`，**不在前端代码里**
+- Vercel env var `D3_WORKER_URL=https://d3-price-worker.dthree.workers.dev`
 - 前端每 **3 分钟**自动 fetch 一次
 - 前端有 **localStorage 缓存**（key: `d3-records-cache`）：打开页面立即显示上次缓存
 
-### Hermes 写入（⚠️ Codex 需要改）
+### Hermes 写入
 ```
-旧 Pantry（已废弃，HTTP 522 挂掉）：
-  POST https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3
-  Body: { "records": [...] }
-
-新 JSONBin（Codex 改这里）：
-  PUT https://api.jsonbin.io/v3/b/6a277a33f5f4af5e29cf0375
-  Headers:
-    X-Master-Key: <见 Vercel env var JSONBIN_KEY，或向加恩索取>
-    Content-Type: application/json
-  Body: { "records": [...] }
+POST https://d3-price-worker.dthree.workers.dev/api/sync
+Headers:
+  X-D3-Secret: <见 D3-runtime\.env 的 D3_CLOUD_SYNC_SECRET>
+  Content-Type: application/json
+Body: { "records": [...] }
 ```
-- JSONBin 用 **PUT**（不是 POST），每次 PUT 都覆盖整个 bin
-- 保留最新 120 条规则不变，Hermes 自行 trim 后 PUT
+- 保留最新 **120 条**规则不变（`sync-cloud-retry.mjs` 中 `maxRecords=120`）
+- Hermes .env 需要：`D3_CLOUD_RECORDS_URL` + `D3_CLOUD_SYNC_SECRET`
 
-> `/data/records.json` 是 Vercel 部署目录里的本地文件，**不是当前线上数据源**。
+> ~~JSONBin bin ID: `6a277a33f5f4af5e29cf0375`~~ — 已废弃，不再使用。
+
+### D1 Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS variant_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL, item_id INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '', sku TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '', capacity TEXT NOT NULL DEFAULT '',
+  tier TEXT NOT NULL DEFAULT '', price REAL,
+  platform TEXT NOT NULL DEFAULT 'shopee',
+  grabbed_at TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(shop_id, item_id, model, tier)
+);
+CREATE TABLE IF NOT EXISTS price_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id INTEGER NOT NULL, item_id INTEGER NOT NULL,
+  sku TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+  tier TEXT NOT NULL DEFAULT '', price REAL NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'shopee',
+  grabbed_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+> `/data/records.json` 是 Hermes 本地文件，**不是线上数据源**。云端以 D1 为准。
 
 ---
 
@@ -195,6 +249,38 @@ C:\D3\scripts\windows\start-chrome-cdp.ps1   # 启动 CDP Chrome
 C:\D3\scripts\windows\start-hermes.ps1        # 常驻抓取
 ```
 
+### Cloudflare Worker 部署（一次性，已完成）
+
+```bash
+# WSL / Linux
+cd /home/dthree3/d3-price-monitor/d3-worker
+npm install
+
+# 1. 建立 D1 数据库（已做，database_id 已填入 wrangler.toml）
+wrangler d1 create d3-price-db
+
+# 2. 初始化 Schema
+npm run db:init   # wrangler d1 execute d3-price-db --file=schema.sql --remote
+
+# 3. 设置写入 secret（只需做一次）
+wrangler secret put D3_SYNC_SECRET
+
+# 4. 部署 Worker
+npm run deploy    # wrangler deploy
+# Worker URL: https://d3-price-worker.dthree.workers.dev
+```
+
+**Hermes .env（`C:\Users\Asus\D3-runtime\.env`）需要：**
+```
+D3_CLOUD_RECORDS_URL=https://d3-price-worker.dthree.workers.dev/api/sync
+D3_CLOUD_SYNC_SECRET=<Worker secret>
+```
+
+**Vercel env var：**
+```
+D3_WORKER_URL=https://d3-price-worker.dthree.workers.dev
+```
+
 ---
 
 ## 12. 费率常数
@@ -234,15 +320,23 @@ C:\D3\scripts\windows\start-hermes.ps1        # 常驻抓取
 
 ---
 
-## 16. 2026-06-09 迁移变更记录（JSONBin）
+## 16. 2026-06-09 迁移变更记录（Cloudflare D1）
+
+### ~~JSONBin 阶段（已废弃）~~
+JSONBin Free Plan 单 bin 限制 100KB，实际 payload 938KB → HTTP 403。决定彻底移除。
+
+### Cloudflare D1 迁移（当前）
 
 | 变更 | 负责方 | 内容 |
 |------|--------|------|
-| 数据源迁移 | Claude | Pantry → JSONBin（Pantry HTTP 522 挂掉） |
-| Vercel API proxy | Claude | `d3-price/api/data.js`，GET/POST/PUT 三种操作 |
-| 环境变量 | Claude | `JSONBIN_KEY` 已加到 Vercel production env |
-| 前端读取 URL | Claude | `P='/api/data'`，CACHE_KEY 改 `d3-records-cache` |
-| Hermes 写入 | **Codex 待做** | 见第 7 节"Hermes 写入"，改成 PUT JSONBin |
+| D1 数据库 | Claude | `d3-price-db`，ID `2637fd89-4284-436d-b076-a6c3a530664f` |
+| Cloudflare Worker | Claude | `d3-price-worker`，`d3-worker/` 目录，`schema.sql` + `src/index.js` |
+| Worker 端点 | Claude | GET `/api/records`、POST `/api/sync`、GET `/api/history` |
+| `sync-cloud-retry.mjs` | Claude | 改为 POST + `X-D3-Secret` header，移除所有 JSONBin 代码 |
+| `d3-price/api/data.js` | Claude | 改为代理 Worker `/api/records`，移除 JSONBin proxy |
+| Vercel env var | Claude | `D3_WORKER_URL=https://d3-price-worker.dthree.workers.dev` |
+| Hermes .env | User | `D3_CLOUD_RECORDS_URL` + `D3_CLOUD_SYNC_SECRET` 已更新 |
+| 数据状态 | — | 509 records，448 有效价格（88%），61 price=null |
 
 ---
 
