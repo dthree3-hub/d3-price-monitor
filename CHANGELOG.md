@@ -6,6 +6,16 @@
 
 ## 2026-06-09
 
+### 突发式抓取 + 网页「立即更新」按钮
+- **文件**：`src/hermes.mjs`、`d3-worker/src/index.js`、`d3-price/index.html`、`C:\D3\.env`
+- **改了什么**：
+  - Hermes 加 `HERMES_CYCLE_GAP_MINUTES`（设 90）：批次间隔仍 1 分钟，但一整圈跑完后休息 90 分钟再开下一圈，降低反爬触发。
+  - Worker 加 `/api/trigger`（POST 设标记 / GET?consume=1 读并清，用 D1 `control` 表）。
+  - Hermes 休息期间每 30 秒轮询 `/api/trigger`，网页按了「立即更新」就提前开抓。
+  - 前端老板视图加「🔄 立即更新」按钮，POST 到 Worker 触发端点（远程也能用）。
+- **为什么**：电脑 24 小时跑时不想被反爬频繁拦；改成「抓一圈→歇1.5小时→再抓」，需要时网页按钮可随时强制抓。
+- **commit**：见下
+
 ### 被反爬拦时重载重试（只慢被拦的链接）
 - **文件**：`src/scraper.mjs`
 - **改了什么**：CDP 读到反爬错误码(如 `90309999`)时，重载页面、等反爬 JS 跑完、再读一次，最多 `HERMES_CDP_ANTIBOT_RETRY`(默认2)次。只有被拦的链接会延迟，正常链接不受影响，批次照常快。

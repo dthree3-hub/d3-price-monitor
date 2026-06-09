@@ -2558,6 +2558,9 @@ function escapeAttribute(value) {
   .boss-catfilter select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;cursor:pointer}
   .boss-catfilter button{padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;font-size:12px;cursor:pointer;color:#9e3d2c}
   .boss-catfilter button:hover{border-color:var(--danger)}
+  .refresh-now-btn{padding:8px 16px;border:none;border-radius:10px;background:var(--accent);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+  .refresh-now-btn:hover{filter:brightness(1.08)}
+  .refresh-now-btn:disabled{opacity:.5;cursor:default}
   .gap-card .model{font-weight:700;font-size:15px}
   .gap-card .big{font-size:21px;font-weight:800;margin-top:6px}
   .gap-lower{color:#9e3d2c}
@@ -3041,6 +3044,7 @@ function escapeAttribute(value) {
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Yellow highlight = that competitor price is lower than ours.</strong></p>' +
+      '<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 立即更新 (Refresh now)</button> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>' +
       `<div class="boss-legend">${legend}</div>` +
       voucherHtml +
       filterHtml +
@@ -3062,6 +3066,21 @@ function escapeAttribute(value) {
       if (el.value === '' || !Number.isFinite(v)) delete ourPrices[mk]; else ourPrices[mk] = v;
       save(OUR_KEY, ourPrices); bossRender();
     }; });
+    const refreshBtn = sec.querySelector('#bossRefreshNow');
+    if (refreshBtn) refreshBtn.onclick = async () => {
+      const msgEl = sec.querySelector('#bossRefreshMsg');
+      refreshBtn.disabled = true;
+      if (msgEl) msgEl.textContent = '已发送请求…';
+      try {
+        const r = await fetch('https://d3-price-worker.dthree.workers.dev/api/trigger', { method: 'POST' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (msgEl) msgEl.textContent = '✅ 已通知 Hermes，抓完后网页会自动刷新（每 3 分钟）。最多等一圈时间。';
+      } catch (e) {
+        if (msgEl) msgEl.textContent = '❌ 请求失败：' + e.message;
+      } finally {
+        setTimeout(() => { refreshBtn.disabled = false; }, 5000);
+      }
+    };
     const catSel = sec.querySelector('#bossCatSel');
     if (catSel) catSel.onchange = () => { bossCat = catSel.value; bossModel = ''; bossRender(); };
     const modelSel = sec.querySelector('#bossModelSel');

@@ -51,6 +51,26 @@ export default {
       return json({ records: rowsToRecords(results) });
     }
 
+    // ── Manual refresh trigger ────────────────────────────────────────────────
+    // 网页按钮 POST 设标记；Hermes 休息时 GET?consume=1 轮询，看到就立刻抓一圈。
+    if (pathname === '/api/trigger') {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS control (k TEXT PRIMARY KEY, v TEXT)`).run();
+      if (request.method === 'POST') {
+        await env.DB.prepare(`INSERT INTO control (k, v) VALUES ('trigger','1')
+          ON CONFLICT(k) DO UPDATE SET v='1'`).run();
+        return json({ ok: true, triggered: true });
+      }
+      if (request.method === 'GET') {
+        const consume = new URL(request.url).searchParams.get('consume') === '1';
+        const row = await env.DB.prepare(`SELECT v FROM control WHERE k='trigger'`).first();
+        const pending = row?.v === '1';
+        if (pending && consume) {
+          await env.DB.prepare(`UPDATE control SET v='0' WHERE k='trigger'`).run();
+        }
+        return json({ pending });
+      }
+    }
+
     // ── POST /api/sync ────────────────────────────────────────────────────────
     // Hermes writes full records array; upsert to D1
     if (pathname === '/api/sync' && request.method === 'POST') {
