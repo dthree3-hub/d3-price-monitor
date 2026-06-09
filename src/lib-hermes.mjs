@@ -97,9 +97,10 @@ export function readHermesBatchState() {
     const parsed = JSON.parse(fs.readFileSync(hermesBatchStateFile, 'utf8'));
     return {
       cursor: Number.isFinite(Number(parsed.cursor)) ? Number(parsed.cursor) : 0,
+      retries: Number.isFinite(Number(parsed.retries)) ? Number(parsed.retries) : 0,
     };
   } catch {
-    return { cursor: 0 };
+    return { cursor: 0, retries: 0 };
   }
 }
 
@@ -107,6 +108,7 @@ export function writeHermesBatchState(state) {
   fs.mkdirSync(path.dirname(hermesBatchStateFile), { recursive: true });
   fs.writeFileSync(hermesBatchStateFile, `${JSON.stringify({
     cursor: Number.isFinite(Number(state?.cursor)) ? Number(state.cursor) : 0,
+    retries: Number.isFinite(Number(state?.retries)) ? Number(state.retries) : 0,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`);
 }

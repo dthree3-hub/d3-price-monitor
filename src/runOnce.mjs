@@ -15,6 +15,7 @@ import {
   logHermes,
   mergeNewRecords,
   productsFile,
+  readHermesBatchState,
   selectProductsBatch,
   sendTelegramMessage,
   writeHermesBatchState,
@@ -205,7 +206,11 @@ export async function runOnce() {
   }
 
   const latestTimestamp = incoming[0]?.grabbedAt || null;
-  const shouldAdvanceBatchCursor = incoming.length > 0;
+  // 抓到新记录就前进；一条都没抓到(可能被反爬拦)最多重试 2 次，超过就跳过这批，
+  // 避免单批被拦死循环、冻结整个轮换。
+  const MAX_BATCH_RETRIES = 2;
+  const prevRetries = Number(readHermesBatchState().retries) || 0;
+  const shouldAdvanceBatchCursor = incoming.length > 0 || prevRetries >= MAX_BATCH_RETRIES;
   const { before, merged } = mergeNewRecords(incoming, allProducts);
   const changes = latestTimestamp ? computeBatchChanges(before, merged, latestTimestamp) : [];
   const markdown = buildHermesMarkdown(changes, latestTimestamp, incoming.length);
@@ -235,9 +240,13 @@ export async function runOnce() {
   }
 
   if (shouldAdvanceBatchCursor) {
-    writeHermesBatchState({ cursor: batchInfo.nextCursor });
+    if (incoming.length === 0) {
+      logHermes(`本批重试 ${prevRetries} 次仍 0 条（可能被反爬拦），跳过该批，cursor 前进到 ${batchInfo.nextCursor}。`);
+    }
+    writeHermesBatchState({ cursor: batchInfo.nextCursor, retries: 0 });
   } else {
-    logHermes(`本轮未抓到新记录，保留 batch cursor=${batchInfo.cursor}，下次继续重跑当前批次。`);
+    writeHermesBatchState({ cursor: batchInfo.cursor, retries: prevRetries + 1 });
+    logHermes(`本轮未抓到新记录，保留 batch cursor=${batchInfo.cursor}（第 ${prevRetries + 1}/${MAX_BATCH_RETRIES} 次重试），下次重跑当前批次。`);
   }
 
   writeHermesStatus({
