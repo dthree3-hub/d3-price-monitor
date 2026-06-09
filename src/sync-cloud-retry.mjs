@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { loadEnvFile, logHermes } from './lib-hermes.mjs';
 import { projectRoot } from './lib-records.mjs';
 
-const DEFAULT_CLOUD_RECORDS_URL = 'https://d3-price-seven.vercel.app/api/data';
+const DEFAULT_CLOUD_RECORDS_URL = 'https://api.jsonbin.io/v3/b/6a277a33f5f4af5e29cf0375';
 const DEFAULT_RECORDS_FILE = path.join(projectRoot, 'data', 'records.json');
 const EXCEL_SAMSUNG_MODEL_KEYS = new Set([
   // Derived from Market Price List.xlsx, Samsung sheet, on 2026-06-08.
@@ -257,13 +257,13 @@ export function buildCloudPayload(records, maxRecords = 120) {
   return { records: payloadRecords };
 }
 
-async function putJsonWithTimeout(url, payload, timeoutMs) {
+async function putJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
   try {
     const response = await fetch(url, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -281,6 +281,8 @@ export async function syncLatestCloudRecords(options = {}) {
   if (!enabled && !options.force) return { synced: false, skipped: true, reason: 'disabled' };
 
   const url = options.url || process.env.D3_CLOUD_RECORDS_URL || DEFAULT_CLOUD_RECORDS_URL;
+  const apiKey = options.apiKey || process.env.D3_CLOUD_API_KEY || '';
+  const extraHeaders = (url.includes('jsonbin.io') && apiKey) ? { 'X-Master-Key': apiKey } : {};
   const recordsFile = options.recordsFile || process.env.D3_RECORDS_FILE || DEFAULT_RECORDS_FILE;
   const maxRecords = Number(options.maxRecords || process.env.HERMES_CLOUD_MAX_RECORDS || 120);
   const attempts = Number(options.attempts || process.env.HERMES_CLOUD_RETRY_ATTEMPTS || 3);
@@ -297,7 +299,7 @@ export async function syncLatestCloudRecords(options = {}) {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      await putJsonWithTimeout(url, payload, timeoutMs);
+      await putJsonWithTimeout(url, payload, timeoutMs, extraHeaders);
       return {
         synced: true,
         url,
