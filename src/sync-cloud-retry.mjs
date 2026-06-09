@@ -8,7 +8,6 @@ const DEFAULT_CLOUD_RECORDS_URL = 'https://d3-price-worker.REPLACE_WITH_YOUR_SUB
 const DEFAULT_RECORDS_FILE = path.join(projectRoot, 'data', 'records.json');
 const EXCEL_SAMSUNG_MODEL_KEYS = new Set([
   // Derived from Market Price List.xlsx, Samsung sheet, on 2026-06-08.
-  'A06 4G 128GB',
   'A06 5G 128GB',
   'A07 4G 256GB',
   'A07 5G 256GB',
