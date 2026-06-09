@@ -5,4 +5,4 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "d3-price-db"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+database_id = "2637fd89-4284-436d-b076-a6c3a530664f"
