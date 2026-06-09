@@ -21,7 +21,7 @@ function normalizeSpaces(text) {
 
 function normalizeCapacity(raw) {
   const text = normalizeSpaces(raw).replace(/[()]/g, '');
-  const withoutModel = text.replace(/^A0?\d{1,2}(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '').trim();
+  const withoutModel = text.replace(/^A0?\d{1,2}(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '').replace(/^(?:Tab\s*)?S1\d\s*(?:Ultra|U(?![A-Za-z])|FE\s*\+?|Lite|\+|Plus)?/i, '').trim();
   const source = withoutModel && withoutModel !== text ? withoutModel : text;
   const ramRom = source.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i);
   if (ramRom) return `${ramRom[1]}+${ramRom[2]}${(ramRom[3] || 'GB').toUpperCase()}`;
@@ -77,6 +77,19 @@ function extractModel(text) {
   if (compact) return `A${String(compact[1]).padStart(2, '0')}${compact[2] ? ` ${compact[2].toUpperCase()}` : ''}`;
   compact = source.match(/^S(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?/i);
   if (compact) return `S${compact[1]}${compact[2] ? (compact[2] === '+' ? '+' : compact[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
+  // 平板 S 系列（S10/S11）：variant 名常无 "Tab" 前缀，"U" 缩写 = Ultra（如 S11U = S11 Ultra）；
+  // 同时支持 FE/FE+/Lite/+ 后缀。families 与 Excel A 列一致（不带 Tab 前缀）。
+  compact = source.match(/^(?:Tab\s*)?S(1\d)\s*(Ultra|U(?![A-Za-z])|FE\s*\+|FE|Lite|\+|Plus)?/i);
+  if (compact) {
+    const raw = (compact[2] || '').toLowerCase().replace(/\s+/g, '');
+    let suffix = '';
+    if (raw === 'ultra' || raw === 'u') suffix = ' Ultra';
+    else if (raw === 'fe+') suffix = ' FE+';
+    else if (raw === 'fe') suffix = ' FE';
+    else if (raw === 'lite') suffix = ' Lite';
+    else if (raw === '+' || raw === 'plus') suffix = '+';
+    return `S${compact[1]}${suffix}`;
+  }
   for (const pattern of MODEL_PATTERNS) {
     const match = source.match(pattern.regex);
     if (match) return normalizeSpaces(pattern.map(...match));
