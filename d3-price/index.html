@@ -2513,8 +2513,13 @@ function escapeAttribute(value) {
     <script>
 (function () {
   const OUR_KEY = 'd3-boss-our-price-v1';
-  const CSP_KEY = 'd3-boss-csp-price-v1'; // 成本价 cspPrice。预留利润: profit = ourPrice - cspPrice; profitMargin = profit / ourPrice（暂不显示利润栏）
+  const CSP_KEY = 'd3-boss-csp-price-v1';
+  const VOUCHER_KEY = 'd3-boss-vouchers-v1';
   const DEFAULT_VOUCHER_DISCOUNT = 5;
+  const DEFAULT_VOUCHERS = { self: 5, A: 5, B: 5, C: 5 };
+  let voucherSettings = (() => { try { return Object.assign({}, DEFAULT_VOUCHERS, JSON.parse(localStorage.getItem(VOUCHER_KEY) || '{}')); } catch { return { ...DEFAULT_VOUCHERS }; } })();
+  function saveVouchers() { try { localStorage.setItem(VOUCHER_KEY, JSON.stringify(voucherSettings)); } catch {} }
+  function voucherForRole(role) { return Number.isFinite(voucherSettings[role]) ? voucherSettings[role] : DEFAULT_VOUCHER_DISCOUNT; }
 
   const css = document.createElement('style');
   css.textContent = `
@@ -2531,6 +2536,13 @@ function escapeAttribute(value) {
   .boss-filter h3{margin:0 0 4px}
   .gap-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:12px}
   .gap-card{border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#fff}
+  .voucher-settings{margin-top:12px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:#fffbf7}
+  .voucher-settings summary{cursor:pointer;font-size:13px;font-weight:600;color:#9e3d2c;user-select:none}
+  .voucher-settings .vs-row{display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:10px;align-items:center}
+  .voucher-settings .vs-item{display:flex;align-items:center;gap:6px;font-size:13px}
+  .voucher-settings .vs-item label{white-space:nowrap;font-weight:600;min-width:90px}
+  .voucher-settings .vs-item input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font-size:13px;text-align:right;font-family:inherit}
+  .voucher-settings .vs-item span{font-size:12px;color:#888}
   .gap-card .model{font-weight:700;font-size:15px}
   .gap-card .big{font-size:21px;font-weight:800;margin-top:6px}
   .gap-lower{color:#9e3d2c}
@@ -2773,7 +2785,7 @@ function escapeAttribute(value) {
         // self(我们公司)是「我们的价」基准列，切到任何对手 tab 都要保留 → 豁免 bossRole 过滤；仍受搜索/系列/型号筛选
         if (typeof matchesCurrentFilters === 'function' && !matchesCurrentFilters(rowForFilters, role === 'self' ? { includeBossRole: false } : {})) continue;
         if (v.currentPrice == null) continue;
-        const effectivePrice = afterVoucher(v.currentPrice);
+        const effectivePrice = afterVoucher(v.currentPrice, voucherForRole(role));
         if (effectivePrice == null) continue;
         const ct = canonTier(v);
         if (!ct) continue; // 只统计 Promo / Basic
@@ -2942,15 +2954,33 @@ function escapeAttribute(value) {
         srcDetailRow;
     }).join('');
 
+    const voucherRows = [
+      { role: 'self', label: 'Our Store' },
+      { role: 'A', label: 'Deal Direct' },
+      { role: 'B', label: 'Spray Gadget' },
+      { role: 'C', label: 'TAC Mobiles' },
+    ].map(({ role, label }) =>
+      `<div class="vs-item"><label>${esc(label)}</label><span>RM</span><input type="number" min="0" step="1" data-vrole="${esc(role)}" value="${voucherSettings[role] ?? DEFAULT_VOUCHER_DISCOUNT}"><span>off</span></div>`
+    ).join('');
+    const voucherHtml = `<details class="voucher-settings"><summary>⚙ Voucher Settings (per shop)</summary><div class="vs-row">${voucherRows}</div></details>`;
+
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
       `<div class="boss-legend">${legend}</div>` +
+      voucherHtml +
       filterHtml +
       (gaps.length ? '<h3>Lowest competitor vs our price</h3>' + `<div class="gap-strip">${gapHtml}</div>` : '') +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
       `<div class="boss-legend">${legend}</div>` +
       `<div style="overflow-x:auto"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    sec.querySelectorAll('input[data-vrole]').forEach((el) => { el.onchange = () => {
+      const role = el.dataset.vrole;
+      const v = parseFloat(el.value);
+      voucherSettings[role] = Number.isFinite(v) && v >= 0 ? v : DEFAULT_VOUCHER_DISCOUNT;
+      saveVouchers();
+      bossRender();
+    }; });
     sec.querySelectorAll('input[data-model]').forEach((el) => { el.onchange = () => {
       const mk = el.dataset.model;
       const v = Number(el.value);
