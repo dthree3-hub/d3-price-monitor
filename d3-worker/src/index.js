@@ -26,7 +26,7 @@ function rowsToRecords(rows) {
       model: r.model,
       capacity: r.capacity,
       tier: r.tier,
-      price: r.price,
+      currentPrice: r.price,
       name: r.sku,
     });
   }
