@@ -2990,16 +2990,13 @@ function escapeAttribute(value) {
 
     <script>
     (function(){
-      var P='https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3';
-      // A) 处理书签传来的上传（#upload=...）：此页在 Vercel，可正常写 Pantry
+      var P='/api/data';
+      // A) 处理书签传来的上传（#upload=...）：POST 单条 record 到 /api/data
       var mm=(location.hash||'').match(/upload=([^&]+)/);
       if(mm){
         var rec;try{rec=JSON.parse(decodeURIComponent(mm[1]));}catch(e){document.body.innerHTML='<div style="font:18px sans-serif;padding:40px;color:#d1453b">Upload data parse failed</div>';return;}
-        fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():{records:[]};}).then(function(cur){
-          if(!cur||!Array.isArray(cur.records))cur={records:[]};
-          cur.records.push(rec);
-          return fetch(P,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cur)});
-        }).then(function(){
+        fetch(P,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(rec)})
+        .then(function(){
           history.replaceState(null,'','/');
           document.body.innerHTML='<div style="font:20px sans-serif;padding:48px;text-align:center;color:#1f2329">✅ Uploaded to dashboard<br><br>'+((rec.title||'').slice(0,40))+'<br>'+((rec.variants||[]).length)+' variants<br><br><span style="color:#888;font-size:15px">This tab will close automatically…</span></div>';
           setTimeout(function(){window.close();},1500);
@@ -3007,7 +3004,7 @@ function escapeAttribute(value) {
         return; // 上传模式不再加载看板
       }
       // B) 正常打开：先显示 localStorage 缓存，后台从云端拉新数据，每3分钟自动刷新
-      var CACHE_KEY='d3-pantry-cache';
+      var CACHE_KEY='d3-records-cache';
       function loadCache(){try{var c=localStorage.getItem(CACHE_KEY);if(c){var d=JSON.parse(c);if(d&&Array.isArray(d.records)){state.records=sortRecords(d.records.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cache. Refreshing...';render();}}}catch(e){}}
       function saveCache(p){try{localStorage.setItem(CACHE_KEY,JSON.stringify(p));}catch(e){}}
       function pull(){return fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(p){var arr=(p&&Array.isArray(p.records))?p.records:[];saveCache({records:arr});state.records=sortRecords(arr.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cloud (auto-refresh every 3 min).';render();});}
@@ -3019,7 +3016,7 @@ function escapeAttribute(value) {
         var _mi=window.mergeIncoming;
         window.mergeIncoming=function(a,b){
           _mi(a,b);
-          fetch(P,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:state.records})})
+          fetch(P,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:state.records})})
             .then(function(){state.source='Import completed and synced to cloud. The boss link is now updated.';render();})
             .catch(function(e){state.source='Import succeeded, but cloud sync failed: '+e.message;render();});
         };
