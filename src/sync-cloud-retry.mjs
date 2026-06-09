@@ -282,8 +282,12 @@ async function putJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
 }
 
 export async function syncLatestCloudRecords(options = {}) {
+  console.log('syncLatestCloudRecords start');
   const enabled = process.env.HERMES_SYNC_CLOUD !== '0';
-  if (!enabled && !options.force) return { synced: false, skipped: true, reason: 'disabled' };
+  if (!enabled && !options.force) {
+    console.log('cloud sync skipped: disabled');
+    return { synced: false, skipped: true, reason: 'disabled' };
+  }
 
   const url = options.url || process.env.D3_CLOUD_RECORDS_URL || DEFAULT_CLOUD_RECORDS_URL;
   const apiKey = options.apiKey || process.env.D3_CLOUD_API_KEY || '';
@@ -306,6 +310,7 @@ export async function syncLatestCloudRecords(options = {}) {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
+      console.log('about to call putJsonWithTimeout, attempt:', attempt);
       await putJsonWithTimeout(url, payload, timeoutMs, extraHeaders);
       return {
         synced: true,
@@ -315,8 +320,10 @@ export async function syncLatestCloudRecords(options = {}) {
         attempt,
         recordsFile,
       };
-    } catch (error) {
-      lastError = error;
+    } catch (err) {
+      console.error('cloud sync error:', err.message);
+      console.error(err.stack);
+      lastError = err;
       if (attempt < attempts) {
         await sleep(baseDelayMs * attempt);
       }
