@@ -2616,6 +2616,11 @@ function escapeAttribute(value) {
   }
   const CAT_ORDER = ['Galaxy A', 'Galaxy S', 'Galaxy Z', 'Tablet', 'Buds', 'Watch', 'Fit', 'Other'];
 
+  // 型号显示：在末尾的存储容量前加斜线，更清晰。如 "A26 5G 256GB" → "A26 5G / 256GB"。仅用于显示，不改 key。
+  function displayMk(mk) {
+    return String(mk || '').replace(/\s+(\d+(?:GB|TB))\s*$/i, ' / $1');
+  }
+
   const esc = (v) => (typeof escapeHtml === 'function'
     ? escapeHtml(v)
     : String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
@@ -2875,7 +2880,7 @@ function escapeAttribute(value) {
     gaps.sort((a, b) => (a.diff == null ? 1e9 : a.diff) - (b.diff == null ? 1e9 : b.diff));
     const gapHtml = gaps.map((g) => {
       const line = `<div class="big gap-lower">-RM${fmtMoney(Math.abs(g.diff))}</div>`;
-      return `<div class="gap-card"><div class="model">${esc(g.mk)}</div><div class="tier-line">Lowest competitor: ${esc(roleName(g.best.role))} ${fmt(g.best.price)}</div>${line}</div>`;
+      return `<div class="gap-card"><div class="model">${esc(displayMk(g.mk))}</div><div class="tier-line">Lowest competitor: ${esc(roleName(g.best.role))} ${fmt(g.best.price)}</div>${line}</div>`;
     }).join('');
 
     // 每个对手在哪些型号上比我们便宜（给可点按钮 + 明细面板用）
@@ -2988,7 +2993,7 @@ function escapeAttribute(value) {
         ? `<tr class="src-detail-row" data-mk="${esc(mk)}"><td colspan="20" style="padding:8px 16px;background:#faf6ef;text-align:left">${srcDetailCells}</td></tr>`
         : '';
 
-      return `<tr><td><strong>${esc(mk)}</strong>${verifyBadge}${debugBtn}</td>` +
+      return `<tr><td><strong>${esc(displayMk(mk))}</strong>${verifyBadge}${debugBtn}</td>` +
         `<td>${ourCell}</td>` +
         cells +
         `<td class="${best ? '' : 'empty-cell'}" style="white-space:normal;line-height:1.6">${best ? `<strong>${esc(roleName(best.role))}</strong><br><span style="font-variant-numeric:tabular-nums">${fmt(best.price)}</span>` : '—'}</td>` +
@@ -3016,7 +3021,7 @@ function escapeAttribute(value) {
     const catOpts = ['<option value="">All categories</option>']
       .concat(catsPresent.map((c) => `<option value="${esc(c)}"${c === bossCat ? ' selected' : ''}>${esc(c)}</option>`)).join('');
     const modelOpts = ['<option value="">All models</option>']
-      .concat(modelsInCat.map((mk) => `<option value="${esc(mk)}"${mk === bossModel ? ' selected' : ''}>${esc(mk)}</option>`)).join('');
+      .concat(modelsInCat.map((mk) => `<option value="${esc(mk)}"${mk === bossModel ? ' selected' : ''}>${esc(displayMk(mk))}</option>`)).join('');
     const catFilterHtml = `<div class="boss-catfilter">
       <label>Category <select id="bossCatSel">${catOpts}</select></label>
       <label>Model <select id="bossModelSel">${modelOpts}</select></label>
@@ -3028,9 +3033,9 @@ function escapeAttribute(value) {
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Yellow highlight = that competitor price is lower than ours.</strong></p>' +
       `<div class="boss-legend">${legend}</div>` +
       voucherHtml +
-      catFilterHtml +
       filterHtml +
       (gaps.length ? '<h3>Lowest competitor vs our price</h3>' + `<div class="gap-strip">${gapHtml}</div>` : '') +
+      catFilterHtml +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
       `<div class="boss-legend">${legend}</div>` +
       `<div style="overflow-x:auto"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;

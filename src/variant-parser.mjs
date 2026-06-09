@@ -142,7 +142,17 @@ export function parseVariantDescriptor(rawName, context = {}) {
   const modelFromName = extractModel(name);
   const titleModel = !isMixedLabel(title) ? extractModel(title) : '';
   const itemModelResolved = !isMixedLabel(itemModel) ? itemModel : '';
-  const model = modelFromName || titleModel || itemModelResolved || '';
+  let model = modelFromName || titleModel || itemModelResolved || '';
+
+  // 平板（A11 / S10 / S11 / Tab）：网络是 WiFi 或 LTE，且可能写在款式名任意位置；
+  // 若型号还没带网络，就从款式名补上，让 WiFi 款和 LTE 款分成不同型号（对手价才对得上）。
+  if (/^(A11|S1\d|Tab)\b/i.test(model) && !/(wifi|lte|\b4g\b|\b5g\b)/i.test(model)) {
+    const tabNet = /\bwifi\b/i.test(name) ? 'WiFi'
+      : (/\blte\b/i.test(name) ? 'LTE'
+      : (/\b5g\b/i.test(name) ? '5G'
+      : (/\b4g\b/i.test(name) ? '4G' : '')));
+    if (tabNet) model = `${model} ${tabNet}`;
+  }
 
   let capacity = normalizeCapacity(name);
   if (!capacity) capacity = masterCapacityFor(model, name, title);
