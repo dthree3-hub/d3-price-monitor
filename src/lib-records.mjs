@@ -45,6 +45,7 @@ export function normalizeRecord(record) {
     title: String(record.title || '未命名商品'),
     currency: String(record.currency || 'MYR'),
     voucherAmount: toNumberOrNull(record.voucherAmount) ?? 0,
+    soldOut: Boolean(record.soldOut),
     variants: record.variants
       .map((variant) => normalizeVariant(variant, {
         title: record.title,

@@ -62,6 +62,7 @@ function normalizeScrapedProduct(product, scraped) {
     title: scraped.title,
     currency: 'MYR',
     voucherAmount: toNonNegativeNumberOrZero(scraped.voucherAmount),
+    soldOut: Array.isArray(scraped.variants) && scraped.variants.length > 0 && scraped.variants.every((v) => v.sold_out),
     variants: scraped.variants.map((variant) => ({
       name: variant.variant,
       ...parseVariantDescriptor(variant.variant, {
@@ -124,6 +125,7 @@ async function scrapeOne(product, mode) {
     title: result.title,
     currency: 'MYR',
     voucherAmount: 0,
+    soldOut: Array.isArray(result.variants) && result.variants.length > 0 && result.variants.every((v) => v.sold_out),
     variants: result.variants.map((variant) => ({
       name: variant.variant,
       currentPrice: variant.current,

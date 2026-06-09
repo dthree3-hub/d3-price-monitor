@@ -6,6 +6,16 @@
 
 ## 2026-06-09
 
+### 售罄(Sold Out)全链路 + 平板统一 Tab 前缀 + 只看低过我们按钮
+- **文件**：`src/runOnce.mjs`、`src/lib-records.mjs`、`src/variant-parser.mjs`、`d3-worker/src/index.js`、`d3-price/index.html`、D1
+- **改了什么**：
+  - 记录级 `soldOut`（整个 listing 所有款式都缺货=售罄）；runOnce 计算、lib-records 保留、sync 透传、Worker 新增 `sold_out` 列存/读、前端 normalizeRecord 保留。
+  - 前端 build() 标记每个(型号,店)是否「只有售罄来源」；表格显示红色 **Sold Out** 代替价格（有其他有货来源则照常显示价）。
+  - 平板统一带 `Tab` 前缀（避免 `S11 Ultra` 与 `Tab S11 Ultra` 拆两行）。
+  - 老板视图加「⚠ 只看低过我们」按钮，过滤出所有有对手低于我们的型号。
+- **为什么**：Deal Direct A06 5G 官网已 OOS 但表格还显示 RM527，需要标售罄；平板前缀不统一导致重复行。
+- **commit**：见下；D1 加 `sold_out` 列并清空重抓。
+
 ### 突发式抓取 + 网页「立即更新」按钮
 - **文件**：`src/hermes.mjs`、`d3-worker/src/index.js`、`d3-price/index.html`、`C:\D3\.env`
 - **改了什么**：

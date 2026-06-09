@@ -1868,6 +1868,7 @@ function normalizeRecord(record) {
     itemModel: String(record.itemModel || record.ourProduct || ''),
     title: String(record.title || 'Untitled product'),
     currency: String(record.currency || 'MYR'),
+    soldOut: Boolean(record.soldOut),
     variants: record.variants
       .map((variant) => normalizeVariant(variant, {
         title: record.title,
@@ -2583,6 +2584,7 @@ function escapeAttribute(value) {
   .price-num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:left}
   .price-dash{display:flex;align-items:center;justify-content:center;color:#c4b8a6;font-variant-numeric:tabular-nums}
   .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
+  .boss-table td.soldout-cell{text-align:center;color:#b23a2b;font-weight:700;font-size:12px;background:rgba(178,58,43,.06)}
   .takeback-pos{color:#27401f;font-weight:700}
   .takeback-neg{color:#b23a2b;font-weight:700}
   .takeback-zero{color:#999;font-weight:700}
@@ -2846,9 +2848,15 @@ function escapeAttribute(value) {
           continue;
         }
         const byRole = models.get(mk);
-        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {} };
-        byRole[role].min = Math.min(byRole[role].min, effectivePrice);
-        byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {}, soldOut: false, hasStock: false };
+        if (r.soldOut) {
+          // 整个 listing 售罄：不计入价格/最低价，只标记 soldOut（仅当没有其他有货来源时才显示 Sold Out）
+          byRole[role].soldOut = true;
+        } else {
+          byRole[role].hasStock = true;
+          byRole[role].min = Math.min(byRole[role].min, effectivePrice);
+          byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+        }
       }
     }
     return { models, selfPrices, selfTiers, sources };
@@ -2952,6 +2960,7 @@ function escapeAttribute(value) {
       }
       const cells = visibleRoles.map((L) => {
         const rd = byRole[L];
+        if (rd && rd.soldOut && !rd.hasStock) return '<td class="soldout-cell">Sold Out</td>';
         if (!rd || rd.min == null || rd.min === Infinity) return '<td class="empty-cell">—</td>';
         const isLowestComp = best && best.role === L; // 该对手是全场最低对手
         const tiers = rd.tiers || {};

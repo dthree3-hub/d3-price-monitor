@@ -19,6 +19,7 @@ function rowsToRecords(rows) {
         itemId: r.item_id,
         title: r.title,
         grabbedAt: r.grabbed_at,
+        soldOut: !!r.sold_out,
         variants: [],
       });
     }
@@ -44,7 +45,7 @@ export default {
     // Returns {records:[...]} compatible with existing frontend
     if (pathname === '/api/records' && request.method === 'GET') {
       const { results } = await env.DB.prepare(`
-        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, grabbed_at
+        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, grabbed_at
         FROM variant_prices
         ORDER BY shop_id, item_id, model, tier
       `).all();
@@ -92,17 +93,19 @@ export default {
           stmts.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
-                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, grabbed_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, grabbed_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
               ON CONFLICT(shop_id, item_id, model, tier) DO UPDATE SET
                 title=excluded.title, sku=excluded.sku,
                 capacity=excluded.capacity, price=excluded.price,
                 voucher_amount=excluded.voucher_amount,
+                sold_out=excluded.sold_out,
                 grabbed_at=excluded.grabbed_at, updated_at=datetime('now')
             `).bind(
               rec.shopId, rec.itemId, rec.title || '', sku,
               v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
               rec.voucherAmount ?? 0,
+              rec.soldOut ? 1 : 0,
               rec.grabbedAt || new Date().toISOString()
             )
           );
