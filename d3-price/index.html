@@ -427,7 +427,6 @@
                 <option value="Deal Direct">Deal Direct</option>
                 <option value="Spray Gadget">Spray Gadget</option>
                 <option value="TAC Mobiles">TAC Mobiles</option>
-                <option value="Urban Republic">Urban Republic</option>
                 <option value="Our Store">Our Store</option>
               </select>
             </div>
@@ -1564,13 +1563,11 @@ const SHOP_ROLE_BY_SHOP = {
   '116917349': 'A',
   '77792787': 'B',
   '271823454': 'C',
-  '56447030': 'D',
 };
 const ROLE_LABELS = {
   A: 'Deal Direct',
   B: 'Spray Gadget',
   C: 'TAC Mobiles',
-  D: 'Urban Republic',
 };
 let pendingWatchlistCommands = '';
 bootstrap();
@@ -2115,7 +2112,6 @@ const SHOP_NAME_FALLBACK = {
   '116917349': 'Deal Direct',
   '77792787': 'Spray Gadget',
   '271823454': 'TAC Mobiles',
-  '56447030': 'Urban Republic',
 };
 
 function prepareWatchlistCommands() {
@@ -2740,16 +2736,14 @@ function escapeAttribute(value) {
     A: 'Deal Direct',
     B: 'Spray Gadget',
     C: 'TAC Mobiles',
-    D: 'Urban Republic',
   };
   const SHOP_ROLES = {
     '54618012': 'self',
     '116917349': 'A',
     '77792787': 'B',
     '271823454': 'C',
-    '56447030': 'D',
   };
-  const activeRoles = ['A', 'B', 'C', 'D'];
+  const activeRoles = ['A', 'B', 'C'];
   const TIER_ORDER = ['Basic', 'Promo', 'SET A']; // 三个配套固定顺序：基本款 / 优惠款 / 礼物款(SET A)
   const roleName = (role) => ROLE_NAMES[role] || role;
 
@@ -2950,7 +2944,7 @@ function escapeAttribute(value) {
 
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
-      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, TAC Mobiles, and Urban Republic. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
+      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
       (gaps.length ? '<h3>Lowest competitor vs our price</h3>' + `<div class="gap-strip">${gapHtml}</div>` : '') +

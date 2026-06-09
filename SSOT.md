@@ -84,7 +84,8 @@ https://d3-price-seven.vercel.app
 | Deal Direct | 116917349 | A |
 | Spray Gadget | 77792787 | B |
 | TAC Mobiles | 271823454 | C |
-| Urban Republic | 56447030 | D |
+
+> ~~Urban Republic (56447030)~~ — 已移除（2026-06-09），不再监控。Codex 需从 watchlist 删除。
 
 ---
 
@@ -177,7 +178,7 @@ CREATE TABLE IF NOT EXISTS price_history (
 ## 8. Full Comparison Table 当前栏位（最终版）
 
 ```
-Model | Our Price | Deal Direct | Spray Gadget | TAC Mobiles | Urban Republic | 👑 Lowest Competitor | Gap | Take Back
+Model | Our Price | Deal Direct | Spray Gadget | TAC Mobiles | 👑 Lowest Competitor | Gap | Take Back
 ```
 
 - **CSP 栏已移除**：不显示在表格。CSP 数据仍存在 localStorage（key: `d3-boss-csp-price-v1`），供 Take Back 计算用
@@ -347,6 +348,7 @@ JSONBin Free Plan 单 bin 限制 100KB，实际 payload 938KB → HTTP 403。决
 | Spray 2D 数据核查 | Codex | `C:\D3\data\records.json` 已有 Spray Gadget 27 个 item 的 2D variants；问题集中在上传前 tier/model 标准化与 Pantry 同步 |
 | A 系列混卖归类规则 | Codex | variant 网络制式优先，避免 `4G/LTE` variant 被 `our_product` 误归到 5G 型号 |
 | Tier 标准化 | Codex | cloud retry uploader 上传前补齐 `A/B/C`、`Offer→Promo`、`Offer(Gift Set)→Promo(Gift Set)` |
+| Urban Republic tier | Codex | UR 无 Set 档位；上传 D1 前空 tier 改为 RAM+容量/容量（如 `12GB+256GB` / `256GB`），取不到才用 `Basic`，避免 D1 `(shop,item,model,tier)` 唯一键覆盖容量 |
 
 ---
 
