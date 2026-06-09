@@ -1,6 +1,6 @@
 const MODEL_PATTERNS = [
   { regex: /\bA0?(\d{1,2})\s*(5G|LTE|4G)?\b/i, map: (_, num, suffix) => `A${String(num).padStart(2, '0')}${suffix ? ` ${suffix.toUpperCase()}` : ''}` },
-  { regex: /\bS\s*(2\d)\s*(Ultra|\+|Plus)?\b/i, map: (_, num, suffix) => `S${num}${suffix ? (suffix === '+' ? '+' : suffix.toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}` },
+  { regex: /\bS\s*(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?\b/i, map: (_, num, suffix) => `S${num}${suffix ? (suffix === '+' ? '+' : suffix.toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}` },
   { regex: /\bZ\s*(Flip|Fold)\s*(\d)\b/i, map: (_, family, num) => `Z ${family[0].toUpperCase()}${family.slice(1).toLowerCase()} ${num}` },
   { regex: /\bTab\s*(A\d+|S\d+\s*(?:FE|Lite|Ultra)?)\b/i, map: (_, model) => `Tab ${String(model).replace(/\s+/g, ' ').trim()}` },
   { regex: /\bWatch\s*(Ultra|\d+\s*Classic|\d+)\b/i, map: (_, model) => `Watch ${String(model).replace(/\s+/g, ' ').trim()}` },
@@ -21,7 +21,7 @@ function normalizeSpaces(text) {
 
 function normalizeCapacity(raw) {
   const text = normalizeSpaces(raw).replace(/[()]/g, '');
-  const withoutModel = text.replace(/^A0?\d{1,2}(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|\+|Plus)?/i, '').trim();
+  const withoutModel = text.replace(/^A0?\d{1,2}(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '').trim();
   const source = withoutModel && withoutModel !== text ? withoutModel : text;
   const ramRom = source.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i);
   if (ramRom) return `${ramRom[1]}+${ramRom[2]}${(ramRom[3] || 'GB').toUpperCase()}`;
@@ -73,7 +73,7 @@ function extractModel(text) {
   const source = normalizeSpaces(text);
   let compact = source.match(/^A(0?\d{1,2})\s*(5G|4G|LTE)?/i);
   if (compact) return `A${String(compact[1]).padStart(2, '0')}${compact[2] ? ` ${compact[2].toUpperCase()}` : ''}`;
-  compact = source.match(/^S(2\d)\s*(Ultra|\+|Plus)?/i);
+  compact = source.match(/^S(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?/i);
   if (compact) return `S${compact[1]}${compact[2] ? (compact[2] === '+' ? '+' : compact[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
   for (const pattern of MODEL_PATTERNS) {
     const match = source.match(pattern.regex);
@@ -105,7 +105,7 @@ function extractColor(text, knownCapacity = '', knownTier = '', knownModel = '')
   const stripped = stripKnownParts(source, [knownCapacity, knownTier, knownModel])
     .replace(/\b(?:5G|LTE|4G)\b/gi, '')
     .replace(/^A\d{2}(?:5G|4G|LTE)?/i, '')
-    .replace(/^S2\d(?:Ultra|\+|Plus)?/i, '')
+    .replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '')
     .trim();
   if (!stripped) return '';
   const token = stripped.split(/\s+/).filter(Boolean).slice(-2).join(' ');
