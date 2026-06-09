@@ -2543,6 +2543,11 @@ function escapeAttribute(value) {
   .voucher-settings .vs-item label{white-space:nowrap;font-weight:600;min-width:90px}
   .voucher-settings .vs-item input{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font-size:13px;text-align:right;font-family:inherit}
   .voucher-settings .vs-item span{font-size:12px;color:#888}
+  .boss-catfilter{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:12px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:#fffbf7}
+  .boss-catfilter label{font-size:13px;font-weight:600;color:#4f3920;display:flex;align-items:center;gap:6px}
+  .boss-catfilter select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;cursor:pointer}
+  .boss-catfilter button{padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;font-size:12px;cursor:pointer;color:#9e3d2c}
+  .boss-catfilter button:hover{border-color:var(--danger)}
   .gap-card .model{font-weight:700;font-size:15px}
   .gap-card .big{font-size:21px;font-weight:800;margin-top:6px}
   .gap-lower{color:#9e3d2c}
@@ -2592,6 +2597,24 @@ function escapeAttribute(value) {
   let cspPrices = load(CSP_KEY, {}); // { [mk]: cspPrice:number } 成本价
   let selectedRole = null; // null = 显示全部；'A'..'D' = 只看某对手比我们便宜的型号
   window.D3_BOSS_SELECTED_ROLE = selectedRole;
+  let bossCat = '';   // 分类筛选：'' = 全部；如 'Galaxy A' / 'Tablet' / 'Buds'
+  let bossModel = ''; // 该分类下选中的具体型号：'' = 全部
+
+  // 分类判定（平板/手机要分开：A11=平板, A06/A16/A17=手机; S10/S11=平板, S25/S26=手机）
+  function bossCategory(mk) {
+    const t = String(mk || '').trim();
+    if (/^Tab\b/i.test(t)) return 'Tablet';
+    if (/^A11\b/i.test(t)) return 'Tablet';
+    if (/^S1\d/i.test(t)) return 'Tablet';
+    if (/^A\d/i.test(t)) return 'Galaxy A';
+    if (/^S2\d/i.test(t)) return 'Galaxy S';
+    if (/^Z\s*(Flip|Fold)/i.test(t)) return 'Galaxy Z';
+    if (/^Watch/i.test(t)) return 'Watch';
+    if (/^Buds/i.test(t)) return 'Buds';
+    if (/^Fit/i.test(t)) return 'Fit';
+    return 'Other';
+  }
+  const CAT_ORDER = ['Galaxy A', 'Galaxy S', 'Galaxy Z', 'Tablet', 'Buds', 'Watch', 'Fit', 'Other'];
 
   const esc = (v) => (typeof escapeHtml === 'function'
     ? escapeHtml(v)
@@ -2886,12 +2909,15 @@ function escapeAttribute(value) {
     }
 
     const visibleRoles = selectedRole ? [selectedRole] : activeRoles;
-    const displayedModelKeys = selectedRole
+    let displayedModelKeys = selectedRole
       ? modelKeys.filter((mk) => {
           const byRole = models.get(mk);
           return byRole[selectedRole] && byRole[selectedRole].min != null;
         })
       : modelKeys;
+    // 分类 / 型号 筛选
+    if (bossCat) displayedModelKeys = displayedModelKeys.filter((mk) => bossCategory(mk) === bossCat);
+    if (bossModel) displayedModelKeys = displayedModelKeys.filter((mk) => mk === bossModel);
 
     const head = `<tr><th style="width:180px">Model</th><th style="width:170px">Our price</th>${visibleRoles.map((L) => `<th style="width:170px">${esc(roleName(L))}</th>`).join('')}<th style="width:180px">👑 Lowest competitor</th><th style="width:110px">Gap</th><th style="width:110px">Take back</th></tr>`;
     const body = displayedModelKeys.map((mk) => {
@@ -2912,7 +2938,7 @@ function escapeAttribute(value) {
           const val = tiers[k];
           if (val == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-dash">—</span></div>`;
           const cheaper = our != null && val < our;
-          const hi = cheaper && isLowestComp && val === rd.min; // 只有低过我们时才高亮
+          const hi = cheaper; // 任何对手价低过我们(我们最低价)就高亮荧光黄
           return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num${hi ? ' lowest' : ''}${cheaper ? ' cheaper' : ''}">${fmt(val)}</span></div>`;
         }).join('');
         return `<td><div class="tier-stack">${rows}</div></td>`;
@@ -2981,11 +3007,28 @@ function escapeAttribute(value) {
     ).join('');
     const voucherHtml = `<details class="voucher-settings"><summary>⚙ Voucher Settings (per shop)</summary><div class="vs-row">${voucherRows}</div></details>`;
 
+    // 分类 + 型号 级联筛选下拉框
+    const catsPresent = CAT_ORDER.filter((c) => modelKeys.some((mk) => bossCategory(mk) === c));
+    if (bossCat && !catsPresent.includes(bossCat)) { bossCat = ''; bossModel = ''; }
+    const modelsInCat = (bossCat ? modelKeys.filter((mk) => bossCategory(mk) === bossCat) : modelKeys)
+      .slice().sort((a, b) => modelSortKey(a).localeCompare(modelSortKey(b)));
+    if (bossModel && !modelsInCat.includes(bossModel)) bossModel = '';
+    const catOpts = ['<option value="">All categories</option>']
+      .concat(catsPresent.map((c) => `<option value="${esc(c)}"${c === bossCat ? ' selected' : ''}>${esc(c)}</option>`)).join('');
+    const modelOpts = ['<option value="">All models</option>']
+      .concat(modelsInCat.map((mk) => `<option value="${esc(mk)}"${mk === bossModel ? ' selected' : ''}>${esc(mk)}</option>`)).join('');
+    const catFilterHtml = `<div class="boss-catfilter">
+      <label>Category <select id="bossCatSel">${catOpts}</select></label>
+      <label>Model <select id="bossModelSel">${modelOpts}</select></label>
+      ${(bossCat || bossModel) ? '<button id="bossCatClear" type="button">✕ Clear</button>' : ''}
+    </div>`;
+
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
-      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
+      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Yellow highlight = that competitor price is lower than ours.</strong></p>' +
       `<div class="boss-legend">${legend}</div>` +
       voucherHtml +
+      catFilterHtml +
       filterHtml +
       (gaps.length ? '<h3>Lowest competitor vs our price</h3>' + `<div class="gap-strip">${gapHtml}</div>` : '') +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
@@ -3004,6 +3047,12 @@ function escapeAttribute(value) {
       if (el.value === '' || !Number.isFinite(v)) delete ourPrices[mk]; else ourPrices[mk] = v;
       save(OUR_KEY, ourPrices); bossRender();
     }; });
+    const catSel = sec.querySelector('#bossCatSel');
+    if (catSel) catSel.onchange = () => { bossCat = catSel.value; bossModel = ''; bossRender(); };
+    const modelSel = sec.querySelector('#bossModelSel');
+    if (modelSel) modelSel.onchange = () => { bossModel = modelSel.value; bossRender(); };
+    const catClear = sec.querySelector('#bossCatClear');
+    if (catClear) catClear.onclick = () => { bossCat = ''; bossModel = ''; bossRender(); };
     sec.querySelectorAll('.src-dbg-btn').forEach((btn) => {
       btn.onclick = () => {
         const mk = btn.dataset.mk;
