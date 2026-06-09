@@ -291,6 +291,9 @@ export async function syncLatestCloudRecords(options = {}) {
 
   const url = options.url || process.env.D3_CLOUD_RECORDS_URL || DEFAULT_CLOUD_RECORDS_URL;
   const apiKey = options.apiKey || process.env.D3_CLOUD_API_KEY || '';
+  console.log('API Key length:', apiKey?.length);
+  console.log('API Key prefix:', apiKey?.slice(0, 8));
+  console.log('API Key suffix:', apiKey?.slice(-6));
   const extraHeaders = (url.includes('jsonbin.io') && apiKey) ? { 'X-Master-Key': apiKey } : {};
   const recordsFile = options.recordsFile || process.env.D3_RECORDS_FILE || DEFAULT_RECORDS_FILE;
   const maxRecords = Number(options.maxRecords || process.env.HERMES_CLOUD_MAX_RECORDS || 120);
