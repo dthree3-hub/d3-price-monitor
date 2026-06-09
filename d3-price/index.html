@@ -464,8 +464,8 @@
         <p class="muted" style="margin-top:6px">Compare the latest two captures for the same `shop_id + item_id + variant` and list the price drops.</p>
         <div class="metrics">
           <div class="metric">
-            <span class="muted">Dropped variants</span>
-            <strong id="metricDrops">0</strong>
+            <span class="muted">Last updated (Malaysia)</span>
+            <strong id="metricDrops" style="font-size:18px">-</strong>
           </div>
           <div class="metric">
             <span class="muted">Largest drop</span>
@@ -2424,6 +2424,16 @@ function formatStatus(change) {
   return 'No change';
 }
 
+// UTC ISO → 马来西亚时间 (MYT, UTC+8) 显示
+function toMalaysiaTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '-';
+  const myt = new Date(d.getTime() + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${myt.getUTCFullYear()}-${p(myt.getUTCMonth() + 1)}-${p(myt.getUTCDate())} ${p(myt.getUTCHours())}:${p(myt.getUTCMinutes())}`;
+}
+
 function render() {
   renderFilterOptions();
   renderDetailsPanel();
@@ -2435,7 +2445,7 @@ function render() {
   metricVariants.textContent = String(rows.length);
   metricShops.textContent = String(new Set(rows.map((row) => row.shopId)).size);
   metricLatest.textContent = records[0]?.grabbedAt?.replace('T', ' ').replace('Z', ' UTC') || '-';
-  metricDrops.textContent = String(drops.length);
+  metricDrops.textContent = toMalaysiaTime(records[0]?.grabbedAt);
   metricMaxDrop.textContent = drops.length ? formatRmDisplay(drops[0].dropAmount) : '-';
 
   renderDropList(drops);
