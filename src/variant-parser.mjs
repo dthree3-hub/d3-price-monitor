@@ -1,7 +1,7 @@
 const MODEL_PATTERNS = [
   { regex: /\bA0?(\d{1,2})\s*(5G|LTE|4G)?\b/i, map: (_, num, suffix) => `A${String(num).padStart(2, '0')}${suffix ? ` ${suffix.toUpperCase()}` : ''}` },
   { regex: /\bS\s*(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?\b/i, map: (_, num, suffix) => `S${num}${suffix ? (suffix === '+' ? '+' : suffix.toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}` },
-  { regex: /\bZ\s*(Flip|Fold)\s*(\d)\b/i, map: (_, family, num) => `Z ${family[0].toUpperCase()}${family.slice(1).toLowerCase()} ${num}` },
+  { regex: /\b(?:Z\s*)?(Flip|Fold)\s*(\d)\s*(FE)?/i, map: (_, family, num, fe) => `Z ${family[0].toUpperCase()}${family.slice(1).toLowerCase()} ${num}${fe ? ' FE' : ''}` },
   { regex: /\bTab\s*(A\d+|S\d+\s*(?:FE|Lite|Ultra)?)\b/i, map: (_, model) => `Tab ${String(model).replace(/\s+/g, ' ').trim()}` },
   { regex: /\bWatch\s*(Ultra|\d+\s*Classic|\d+)\b/i, map: (_, model) => `Watch ${String(model).replace(/\s+/g, ' ').trim()}` },
   { regex: /\bBuds\s*(\d+\s*FE|\d+\s*Pro|\d+|Core)\b/i, map: (_, model) => `Buds ${String(model).replace(/\s+/g, ' ').trim()}` },
@@ -70,7 +70,9 @@ function extractTier(text) {
 }
 
 function extractModel(text) {
-  const source = normalizeSpaces(text);
+  // 剥掉赠品后缀如 "(+Buds Core)" / "(+ 15W Charger)"：以 + 开头的括号是赠品，不是型号；
+  // 不碰容量括号 "(12+256)"（以数字开头）。否则手机会被误判成 Buds Core 等赠品名。
+  const source = normalizeSpaces(String(text || '').replace(/\(\s*\+[^)]*\)/g, ' '));
   let compact = source.match(/^A(0?\d{1,2})\s*(5G|4G|LTE)?/i);
   if (compact) return `A${String(compact[1]).padStart(2, '0')}${compact[2] ? ` ${compact[2].toUpperCase()}` : ''}`;
   compact = source.match(/^S(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?/i);
