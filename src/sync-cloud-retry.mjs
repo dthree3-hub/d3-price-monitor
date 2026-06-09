@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { loadEnvFile, logHermes } from './lib-hermes.mjs';
 import { projectRoot } from './lib-records.mjs';
 
-const DEFAULT_CLOUD_RECORDS_URL = 'https://api.jsonbin.io/v3/b/6a277a33f5f4af5e29cf0375';
+const DEFAULT_CLOUD_RECORDS_URL = 'https://d3-price-worker.REPLACE_WITH_YOUR_SUBDOMAIN.workers.dev/api/sync';
 const DEFAULT_RECORDS_FILE = path.join(projectRoot, 'data', 'records.json');
 const EXCEL_SAMSUNG_MODEL_KEYS = new Set([
   // Derived from Market Price List.xlsx, Samsung sheet, on 2026-06-08.
@@ -257,23 +257,20 @@ export function buildCloudPayload(records, maxRecords = 120) {
   return { records: payloadRecords };
 }
 
-async function putJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
+async function postJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
   try {
-    console.log('JSONBin URL:', url);
-    console.log('Has API Key:', !!extraHeaders['X-Master-Key']);
     const response = await fetch(url, {
-      method: 'PUT',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json', ...extraHeaders },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
     const responseText = await response.text();
-    console.log('JSONBin Status:', response.status);
-    console.log('JSONBin Response:', responseText.slice(0, 500));
+    logHermes(`云端同步响应: HTTP ${response.status} ${responseText.slice(0, 200)}`);
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`HTTP ${response.status}: ${responseText.slice(0, 100)}`);
     }
     return response;
   } finally {
@@ -282,19 +279,12 @@ async function putJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
 }
 
 export async function syncLatestCloudRecords(options = {}) {
-  console.log('syncLatestCloudRecords start');
   const enabled = process.env.HERMES_SYNC_CLOUD !== '0';
-  if (!enabled && !options.force) {
-    console.log('cloud sync skipped: disabled');
-    return { synced: false, skipped: true, reason: 'disabled' };
-  }
+  if (!enabled && !options.force) return { synced: false, skipped: true, reason: 'disabled' };
 
   const url = options.url || process.env.D3_CLOUD_RECORDS_URL || DEFAULT_CLOUD_RECORDS_URL;
-  const apiKey = options.apiKey || process.env.D3_CLOUD_API_KEY || '';
-  console.log('API Key length:', apiKey?.length);
-  console.log('API Key prefix:', apiKey?.slice(0, 8));
-  console.log('API Key suffix:', apiKey?.slice(-6));
-  const extraHeaders = (url.includes('jsonbin.io') && apiKey) ? { 'X-Master-Key': apiKey } : {};
+  const syncSecret = options.syncSecret || process.env.D3_CLOUD_SYNC_SECRET || '';
+  const extraHeaders = syncSecret ? { 'X-D3-Secret': syncSecret } : {};
   const recordsFile = options.recordsFile || process.env.D3_RECORDS_FILE || DEFAULT_RECORDS_FILE;
   const maxRecords = Number(options.maxRecords || process.env.HERMES_CLOUD_MAX_RECORDS || 120);
   const attempts = Number(options.attempts || process.env.HERMES_CLOUD_RETRY_ATTEMPTS || 3);
@@ -307,14 +297,11 @@ export async function syncLatestCloudRecords(options = {}) {
 
   const payload = buildCloudPayload(records, Number.isFinite(maxRecords) && maxRecords > 0 ? maxRecords : 120);
   const bytes = Buffer.byteLength(JSON.stringify(payload));
-  console.log('Records count:', records?.length);
-  console.log('Payload size:', JSON.stringify(payload).length);
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      console.log('about to call putJsonWithTimeout, attempt:', attempt);
-      await putJsonWithTimeout(url, payload, timeoutMs, extraHeaders);
+      await postJsonWithTimeout(url, payload, timeoutMs, extraHeaders);
       return {
         synced: true,
         url,
@@ -324,8 +311,6 @@ export async function syncLatestCloudRecords(options = {}) {
         recordsFile,
       };
     } catch (err) {
-      console.error('cloud sync error:', err.message);
-      console.error(err.stack);
       lastError = err;
       if (attempt < attempts) {
         await sleep(baseDelayMs * attempt);

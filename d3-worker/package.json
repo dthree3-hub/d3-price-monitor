@@ -1,0 +1,14 @@
+{
+  "name": "d3-price-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute d3-price-db --file=schema.sql --remote",
+    "db:local": "wrangler d1 execute d3-price-db --file=schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
