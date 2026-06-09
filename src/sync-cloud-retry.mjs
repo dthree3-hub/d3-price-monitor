@@ -90,11 +90,24 @@ function isStorageValue(value) {
   return /^(?:64|128|256|512)GB$|^1TB$/i.test(String(value || ''));
 }
 
+function toNumberOrNull(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function normalizeStorageText(value) {
   return String(value || '')
     .replace(/\b\d+\s*GB\s*(?:RAM)?\s*[+\/-]\s*((?:64|128|256|512)\s*(?:GB)?|1024\s*(?:GB)?|1\s*TB)(?:\s*ROM)?\b/gi, (_, storage) => normalizeStorageValue(storage))
     .replace(/\b\d+\s*[+\/-]\s*((?:64|128|256|512)\s*(?:GB)?|1024\s*(?:GB)?|1\s*TB)\b/gi, (_, storage) => normalizeStorageValue(storage))
     .replace(/\b\d+\s*GB\s+RAM\s*\+\s*((?:64|128|256|512)\s*(?:GB)?|1024\s*(?:GB)?|1\s*TB)\s*ROM\b/gi, (_, storage) => normalizeStorageValue(storage));
+}
+
+function ramStorageTier(value) {
+  const text = String(value || '');
+  const match = text.match(/\b(\d+)\s*(?:GB)?\s*[+\/-]\s*((?:64|128|256|512)\s*(?:GB)?|1024\s*(?:GB)?|1\s*TB)\b/i);
+  if (!match) return '';
+  return `${match[1]}GB+${normalizeStorageValue(match[2])}`;
 }
 
 function normalizeNetworkText(value) {
@@ -199,6 +212,14 @@ function applyVariantNetwork(base, variantNetwork) {
   return `${base.replace(/\s+(?:4G|5G)\b/i, '').trim()} ${variantNetwork}`;
 }
 
+function fallbackTierFor(record, variant, rawName, capacity) {
+  if (String(record?.shopId || '') !== '56447030') return '';
+  return ramStorageTier(rawName)
+    || ramStorageTier(variant?.capacity)
+    || (isStorageValue(capacity) ? capacity : '')
+    || 'Basic';
+}
+
 function splitOfficialKey(key) {
   const capacity = storageOnly(key);
   return {
@@ -232,16 +253,20 @@ function officialModelFor(record, variant, name, capacity) {
 
 function sanitizeVariant(variant, record) {
   if (!variant || typeof variant !== 'object') return variant;
+  const rawName = variant.name || '';
   const name = normalizeNetworkText(normalizeStorageText(variant.name || ''));
   const parsedCapacity = storageOnly(variant.capacity || name);
   const fallbackCapacity = isStorageValue(parsedCapacity) ? parsedCapacity : '';
   const official = officialModelFor(record, variant, name, fallbackCapacity);
+  const capacity = official?.capacity || fallbackCapacity;
+  const tier = inferTier(name, variant.tier) || fallbackTierFor(record, variant, rawName, capacity);
   return {
     ...variant,
     name,
     model: official?.model || normalizeCaseModel(normalizeModel(variant.model || '', name)),
-    capacity: official?.capacity || fallbackCapacity,
-    tier: inferTier(name, variant.tier),
+    capacity,
+    tier,
+    price: toNumberOrNull(variant.price ?? variant.currentPrice),
   };
 }
 

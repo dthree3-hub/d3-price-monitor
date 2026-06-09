@@ -28,6 +28,7 @@ function rowsToRecords(rows) {
       tier: r.tier,
       currentPrice: r.price,
       name: r.sku,
+      voucherAmount: r.voucher_amount ?? 0,
     });
   }
   return Array.from(map.values());
@@ -43,7 +44,7 @@ export default {
     // Returns {records:[...]} compatible with existing frontend
     if (pathname === '/api/records' && request.method === 'GET') {
       const { results } = await env.DB.prepare(`
-        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, grabbed_at
+        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, grabbed_at
         FROM variant_prices
         ORDER BY shop_id, item_id, model, tier
       `).all();
@@ -71,20 +72,22 @@ export default {
           stmts.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
-                (shop_id, item_id, title, sku, model, capacity, tier, price, grabbed_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
+                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, grabbed_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
               ON CONFLICT(shop_id, item_id, model, tier) DO UPDATE SET
                 title=excluded.title, sku=excluded.sku,
                 capacity=excluded.capacity, price=excluded.price,
+                voucher_amount=excluded.voucher_amount,
                 grabbed_at=excluded.grabbed_at, updated_at=datetime('now')
             `).bind(
               rec.shopId, rec.itemId, rec.title || '', sku,
-              v.model, v.capacity || '', v.tier || '', v.price ?? null,
+              v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
+              rec.voucherAmount ?? 0,
               rec.grabbedAt || new Date().toISOString()
             )
           );
           // Insert history only when price actually changes
-          if (v.price != null) {
+          if (v.currentPrice != null) {
             stmts.push(
               env.DB.prepare(`
                 INSERT INTO price_history (shop_id, item_id, sku, model, tier, price, grabbed_at)
@@ -95,9 +98,9 @@ export default {
                     AND grabbed_at > datetime('now','-1 hour')
                 )
               `).bind(
-                rec.shopId, rec.itemId, sku, v.model, v.tier || '', v.price,
+                rec.shopId, rec.itemId, sku, v.model, v.tier || '', v.currentPrice,
                 rec.grabbedAt || new Date().toISOString(),
-                rec.shopId, rec.itemId, v.model, v.tier || '', v.price
+                rec.shopId, rec.itemId, v.model, v.tier || '', v.currentPrice
               )
             );
           }

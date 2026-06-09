@@ -2813,6 +2813,23 @@ function escapeAttribute(value) {
   }
 
   function bossRender() {
+    // Auto-populate voucher settings from Hermes-detected voucherAmount in records
+    const _recs = (typeof state !== 'undefined' && state.records) || [];
+    const _latest = latestPerShopItem(_recs);
+    const autoVouchers = {};
+    for (const _r of _latest) {
+      const _role = SHOP_ROLES[String(_r.shopId)];
+      if (!_role) continue;
+      for (const _v of _r.variants) {
+        if (_v.voucherAmount > 0) autoVouchers[_role] = Math.max(autoVouchers[_role] || 0, _v.voucherAmount);
+      }
+    }
+    let _autoSaved = false;
+    for (const _role of Object.keys(autoVouchers)) {
+      if (autoVouchers[_role] !== voucherSettings[_role]) { voucherSettings[_role] = autoVouchers[_role]; _autoSaved = true; }
+    }
+    if (_autoSaved) saveVouchers();
+
     const { models, selfPrices, selfTiers, sources } = build();
     document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
 
@@ -2960,7 +2977,7 @@ function escapeAttribute(value) {
       { role: 'B', label: 'Spray Gadget' },
       { role: 'C', label: 'TAC Mobiles' },
     ].map(({ role, label }) =>
-      `<div class="vs-item"><label>${esc(label)}</label><span>RM</span><input type="number" min="0" step="1" data-vrole="${esc(role)}" value="${voucherSettings[role] ?? DEFAULT_VOUCHER_DISCOUNT}"><span>off</span></div>`
+      `<div class="vs-item"><label>${esc(label)}</label><span>RM</span><input type="number" min="0" step="1" data-vrole="${esc(role)}" value="${voucherSettings[role] ?? DEFAULT_VOUCHER_DISCOUNT}"><span>off${autoVouchers[role] > 0 ? ' <span style="color:#27401f;font-size:11px">(auto)</span>' : ''}</span></div>`
     ).join('');
     const voucherHtml = `<details class="voucher-settings"><summary>⚙ Voucher Settings (per shop)</summary><div class="vs-row">${voucherRows}</div></details>`;
 
