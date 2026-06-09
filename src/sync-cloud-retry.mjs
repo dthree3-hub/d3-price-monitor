@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { loadEnvFile, logHermes } from './lib-hermes.mjs';
 import { projectRoot } from './lib-records.mjs';
 
-const DEFAULT_CLOUD_RECORDS_URL = 'https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3';
+const DEFAULT_CLOUD_RECORDS_URL = 'https://d3-price-seven.vercel.app/api/data';
 const DEFAULT_RECORDS_FILE = path.join(projectRoot, 'data', 'records.json');
 const EXCEL_SAMSUNG_MODEL_KEYS = new Set([
   // Derived from Market Price List.xlsx, Samsung sheet, on 2026-06-08.
@@ -257,12 +257,12 @@ export function buildCloudPayload(records, maxRecords = 120) {
   return { records: payloadRecords };
 }
 
-async function postJsonWithTimeout(url, payload, timeoutMs) {
+async function putJsonWithTimeout(url, payload, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
   try {
     const response = await fetch(url, {
-      method: 'POST',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -297,7 +297,7 @@ export async function syncLatestCloudRecords(options = {}) {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      await postJsonWithTimeout(url, payload, timeoutMs);
+      await putJsonWithTimeout(url, payload, timeoutMs);
       return {
         synced: true,
         url,
