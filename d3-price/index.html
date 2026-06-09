@@ -2539,9 +2539,9 @@ function escapeAttribute(value) {
   .gap-card .big{font-size:21px;font-weight:800;margin-top:6px}
   .gap-lower{color:#9e3d2c}
   .gap-higher{color:#27401f}
-  .boss-table{width:100%;border-collapse:collapse;margin-top:12px;border:1px solid #e5d6bd;background:#fff}
-  .boss-table th,.boss-table td{padding:10px 12px;border-right:1px solid #eadcc8;border-bottom:1px solid #eadcc8;text-align:right;white-space:nowrap;vertical-align:middle}
-  .boss-table th:first-child,.boss-table td:first-child{text-align:left;white-space:normal}
+  .boss-table{width:100%;border-collapse:collapse;margin-top:12px;border:1px solid #e5d6bd;background:#fff;table-layout:fixed}
+  .boss-table th,.boss-table td{padding:10px 8px;border-right:1px solid #eadcc8;border-bottom:1px solid #eadcc8;text-align:center;white-space:nowrap;vertical-align:middle;overflow:hidden}
+  .boss-table th:first-child,.boss-table td:first-child{text-align:left;white-space:normal;overflow:visible}
   .boss-table th{font-size:12px;color:#735632;text-transform:uppercase;letter-spacing:.03em;background:#f7efe1}
   .boss-table tbody tr:hover{background:rgba(0,0,0,.03)}
   .cheaper{color:#9e3d2c;font-weight:800}
@@ -2556,16 +2556,18 @@ function escapeAttribute(value) {
   .tier-stack .tier-tag{font-size:11px;color:#9c8966;white-space:nowrap;text-align:right}
   .price-num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:left}
   .price-dash{display:flex;align-items:center;justify-content:center;color:#c4b8a6;font-variant-numeric:tabular-nums}
-  @media (min-width:768px){
-    /* 桌面：表格铺满容器(100%)。价格列收缩到内容、保持紧凑；MODEL 固定宽；
-       LOWEST COMPETITOR(倒数第二列)吃掉所有剩余宽度(相当于 1fr)，消除 GAP 后方大片空白；GAP 最小宽 */
-    .boss-table{width:100%}
-    .boss-table th:not(:first-child),.boss-table td:not(:first-child){width:1px;white-space:nowrap}
-    .boss-table th:first-child,.boss-table td:first-child{white-space:nowrap;width:1px}
-    .boss-table th:nth-last-child(2),.boss-table td:nth-last-child(2){width:auto;text-align:left;padding-left:28px}
-    .boss-table th:last-child,.boss-table td:last-child{padding-right:22px}
-  }
   .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
+  .takeback-pos{color:#27401f;font-weight:700}
+  .takeback-neg{color:#b23a2b;font-weight:700}
+  .takeback-zero{color:#999;font-weight:700}
+  .needs-verify{color:#b45309;font-size:13px;cursor:default}
+  .src-dbg-btn{background:none;border:none;cursor:pointer;font-size:13px;padding:0 2px;opacity:.6;vertical-align:middle}
+  .src-dbg-btn:hover{opacity:1}
+  .src-detail-row{display:none}
+  .src-detail-row.src-row-open{display:table-row}
+  .src-item{font-size:12px;padding:2px 0;color:#4f3920}
+  .src-item a{color:#1a6a8a;word-break:break-all}
+  .src-role{display:inline-block;background:#f0e6d3;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;margin-right:6px;white-space:nowrap}
   `;
   document.head.append(css);
 
@@ -2627,6 +2629,48 @@ function escapeAttribute(value) {
       .replace(/\s+Mixed$/i, '')
       .trim();
   };
+  // LTE is informal for 4G — standardize to 4G
+  const normalizeModelKey = (mk) => {
+    if (!mk) return null;
+    return mk.replace(/\bLTE\b/gi, '4G').replace(/\s+/g, ' ').trim();
+  };
+  // Known Samsung model families sold in MY (base name without storage/connectivity)
+  const SAMSUNG_KNOWN_FAMILIES = new Set([
+    'A06','A07','A15','A16','A17','A25','A26','A35','A36','A37','A55','A56','A57',
+    'S23','S23+','S23 Ultra','S24','S24+','S24 Ultra','S24 FE',
+    'S25','S25+','S25 Ultra','S25 FE','S26','S26+','S26 Ultra',
+    'Tab A9','Tab A11','Tab S9','Tab S9 FE','Tab S9+','Tab S9 Ultra',
+    'Tab S10','Tab S10 FE','Tab S10+','Tab S10 Ultra','Tab S10 Lite',
+    'Tab S11','Tab S11+','Tab S11 Ultra',
+    'Z Flip 5','Z Flip 6','Z Flip 7','Z Fold 5','Z Fold 6','Z Fold 7',
+    'Buds 3','Buds 3 FE','Buds 3 Pro','Buds 4','Buds 4 Pro',
+    'Watch 8','Watch 8 Classic','Watch Ultra','Fit 3',
+  ]);
+  const isKnownSamsungModel = (mk) => {
+    if (!mk) return false;
+    const fam = mk
+      .replace(/\s*(4G|5G)\s*/gi, ' ')
+      .replace(/\s*\d+\s*(GB|TB)\s*$/i, '')
+      .replace(/\s+/g, ' ').trim();
+    return SAMSUNG_KNOWN_FAMILIES.has(fam);
+  };
+  // Sort key: category → model number → variant (Ultra>+>base) → connectivity (4G<5G) → storage
+  const modelSortKey = (mk) => {
+    const s = String(mk || '');
+    let cat = 5;
+    if (/^a\d/i.test(s)) cat = 0;
+    else if (/^s\d/i.test(s)) cat = 1;
+    else if (/^tab/i.test(s)) cat = 2;
+    else if (/^z\s*(flip|fold)/i.test(s)) cat = 3;
+    else if (/^(watch|fit\s*\d|buds)/i.test(s)) cat = 4;
+    const numM = s.match(/[a-zA-Z]+(\d+)/);
+    const num = numM ? parseInt(numM[1]).toString().padStart(4, '0') : '0000';
+    const variant = /ultra/i.test(s) ? '2' : s.includes('+') ? '1' : '0';
+    const conn = /5g/i.test(s) ? '1' : '0';
+    const storM = s.match(/(\d+)\s*(GB|TB)\b/i);
+    const stor = storM ? (parseInt(storM[1]) * (/TB/i.test(storM[2]) ? 1000 : 1)).toString().padStart(6, '0') : '000000';
+    return `${cat}|${num}|${variant}|${conn}|${stor}`;
+  };
   const capacityLabelOf = (n) => {
     const text = String(n || '').trim();
     const m = text.match(/(\d+)\+(\d+)(GB|TB)/i);
@@ -2636,7 +2680,7 @@ function escapeAttribute(value) {
   // 从标题/款式里提取干净型号键：优先按 variantName 判断机型，避免一个 listing 标题同时写 S26/S26+/Ultra 时全被误判成 Ultra。
   const modelKeyOf = (title, variant, ourModel) => {
     if (variant && typeof variant === 'object' && variant.model) {
-      return variant.model + (variant.capacity ? ` ${capacityLabelOf(variant.capacity)}` : '');
+      return normalizeModelKey(variant.model + (variant.capacity ? ` ${capacityLabelOf(variant.capacity)}` : ''));
     }
     const variantName = typeof variant === 'object' ? variant.name : variant;
     const variantHay = String(variantName).toLowerCase();
@@ -2663,7 +2707,7 @@ function escapeAttribute(value) {
     const m = vn.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i); // RAM+存储 → 取第二个(存储)，兼容 12+512 / 12GB+256GB
     if (m) stor = m[2] + (m[3] ? m[3].toUpperCase() : 'GB');
     else { const m2 = vn.match(/\b(\d+)\s*(GB|TB)\b/i); if (m2) stor = m2[1] + m2[2].toUpperCase(); }
-    return fam + (stor ? ' ' + stor : '');
+    return normalizeModelKey(fam + (stor ? ' ' + stor : ''));
   };
   const tierOf = (n) => {
     if (n && typeof n === 'object' && n.tier) return String(n.tier).trim();
@@ -2677,7 +2721,7 @@ function escapeAttribute(value) {
     if (t.indexOf('demo') >= 0) return null;
     if (t.indexOf('promo') >= 0) return 'Promo';
     if (t.indexOf('basic') >= 0) return 'Basic';
-    if (t.indexOf('set a') >= 0) return 'SET A';
+    if (t.indexOf('set a') >= 0 || t === 'a') return 'SET A';
     // 有些店没有 Basic/Promo 档，档位栏直接写容量(如 Urban Republic "12GB+256GB") → 当成标准价
     if (/\d+\s*gb|\d+\s*\+\s*\d+|\d+\s*tb/i.test(t)) return 'Standard';
     return null;
@@ -2716,6 +2760,7 @@ function escapeAttribute(value) {
     const models = new Map();
     const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价
     const selfTiers = {}; // 我们自己的 Basic / Promo 分价
+    const sources = new Map(); // mk → [{title,shopId,itemId,sellerName,role}]
     for (const r of latest) {
       const role = SHOP_ROLES[String(r.shopId)];
       if (!role) continue;
@@ -2741,6 +2786,11 @@ function escapeAttribute(value) {
         const mk = modelKeyOf(r.title, v, (window.D3_ITEM_MODEL || {})[String(r.itemId)]);
         if (!mk) continue;
         if (!models.has(mk)) models.set(mk, {});
+        if (!sources.has(mk)) sources.set(mk, []);
+        const _srcArr = sources.get(mk);
+        if (!_srcArr.some(s => s.shopId === r.shopId && s.itemId === r.itemId)) {
+          _srcArr.push({ title: r.title, shopId: String(r.shopId), itemId: String(r.itemId), sellerName: r.sellerName || roleName(role), role });
+        }
         if (role === 'self') {
           selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
           if (!selfTiers[mk]) selfTiers[mk] = {};
@@ -2753,14 +2803,14 @@ function escapeAttribute(value) {
         byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
       }
     }
-    return { models, selfPrices, selfTiers };
+    return { models, selfPrices, selfTiers, sources };
   }
 
   function bossRender() {
-    const { models, selfPrices, selfTiers } = build();
+    const { models, selfPrices, selfTiers, sources } = build();
     document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
 
-    const modelKeys = [...models.keys()].sort();
+    const modelKeys = [...models.keys()].sort((a, b) => modelSortKey(a).localeCompare(modelSortKey(b)));
 
     const gaps = [];
     for (const mk of modelKeys) {
@@ -2820,7 +2870,7 @@ function escapeAttribute(value) {
         })
       : modelKeys;
 
-    const head = `<tr><th>Model</th><th>CSP</th><th>Our price</th>${visibleRoles.map((L) => `<th>${esc(roleName(L))}</th>`).join('')}<th>👑 Lowest competitor</th><th>Gap</th></tr>`;
+    const head = `<tr><th style="width:180px">Model</th><th style="width:170px">Our price</th>${visibleRoles.map((L) => `<th style="width:170px">${esc(roleName(L))}</th>`).join('')}<th style="width:180px">👑 Lowest competitor</th><th style="width:110px">Gap</th><th style="width:110px">Take back</th></tr>`;
     const body = displayedModelKeys.map((mk) => {
       const byRole = models.get(mk);
       const manual = ourPrices[mk];
@@ -2866,14 +2916,36 @@ function escapeAttribute(value) {
       }
 
       const csp = cspPrices[mk];
-      const cspCell = `<input class="ourprice-input csp-input" data-csp="${esc(mk)}" type="number" inputmode="numeric" value="${csp == null ? '' : csp}" placeholder="Cost">`;
+      const tb = best != null && csp != null ? best.price - csp : null;
+      const tbHtml = tb == null
+        ? '—'
+        : tb > 0
+          ? `<span class="takeback-pos">RM${fmtMoney(tb)}</span>`
+          : tb < 0
+            ? `<span class="takeback-neg">-RM${fmtMoney(Math.abs(tb))}</span>`
+            : `<span class="takeback-zero">RM0</span>`;
 
-      return `<tr><td><strong>${esc(mk)}</strong></td>` +
-        `<td>${cspCell}</td>` +
+      const srcList = sources.get(mk) || [];
+      const needsVerify = !isKnownSamsungModel(mk);
+      const verifyBadge = needsVerify ? ' <span class="needs-verify" title="Cannot match Samsung official model">⚠</span>' : '';
+      const debugBtn = srcList.length
+        ? ` <button class="src-dbg-btn" data-mk="${esc(mk)}">🔍</button>`
+        : '';
+      const srcDetailCells = srcList.map(s => {
+        const url = `https://shopee.com.my/product/${s.shopId}/${s.itemId}`;
+        return `<div class="src-item"><span class="src-role">${esc(s.sellerName)}</span> <a href="${url}" target="_blank" rel="noopener">${esc(s.title.slice(0, 70))}</a></div>`;
+      }).join('');
+      const srcDetailRow = srcList.length
+        ? `<tr class="src-detail-row" data-mk="${esc(mk)}"><td colspan="20" style="padding:8px 16px;background:#faf6ef;text-align:left">${srcDetailCells}</td></tr>`
+        : '';
+
+      return `<tr><td><strong>${esc(mk)}</strong>${verifyBadge}${debugBtn}</td>` +
         `<td>${ourCell}</td>` +
         cells +
-        `<td class="${best ? '' : 'empty-cell'}">${best ? esc(roleName(best.role)) + ' ' + fmt(best.price) : '—'}</td>` +
-        `<td class="${diff == null ? 'empty-cell' : ''}">${diffHtml}</td></tr>`;
+        `<td class="${best ? '' : 'empty-cell'}" style="white-space:normal;line-height:1.6">${best ? `<strong>${esc(roleName(best.role))}</strong><br><span style="font-variant-numeric:tabular-nums">${fmt(best.price)}</span>` : '—'}</td>` +
+        `<td class="${diff == null ? 'empty-cell' : ''}">${diffHtml}</td>` +
+        `<td class="${tb == null ? 'empty-cell' : ''}">${tbHtml}</td></tr>` +
+        srcDetailRow;
     }).join('');
 
     sec.innerHTML =
@@ -2891,12 +2963,13 @@ function escapeAttribute(value) {
       if (el.value === '' || !Number.isFinite(v)) delete ourPrices[mk]; else ourPrices[mk] = v;
       save(OUR_KEY, ourPrices); bossRender();
     }; });
-    sec.querySelectorAll('input[data-csp]').forEach((el) => { el.onchange = () => {
-      const mk = el.dataset.csp;
-      const v = Number(el.value);
-      if (el.value === '' || !Number.isFinite(v)) delete cspPrices[mk]; else cspPrices[mk] = v;
-      save(CSP_KEY, cspPrices); // 暂不 bossRender：CSP 还不影响显示，避免输入时重建丢焦点
-    }; });
+    sec.querySelectorAll('.src-dbg-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const mk = btn.dataset.mk;
+        const detailRow = sec.querySelector(`.src-detail-row[data-mk="${mk}"]`);
+        if (detailRow) detailRow.classList.toggle('src-row-open');
+      };
+    });
     sec.querySelectorAll('.boss-legend button').forEach((btn) => { btn.onclick = () => {
       const r = btn.dataset.role;
       selectedRole = (r === 'all' || r === selectedRole) ? null : r;
@@ -2933,10 +3006,14 @@ function escapeAttribute(value) {
         }).catch(function(e){document.body.innerHTML='<div style="font:18px sans-serif;padding:40px;color:#d1453b">Upload failed: '+e.message+'</div>';});
         return; // 上传模式不再加载看板
       }
-      // B) 正常打开：从云端读 + 每分钟自动刷新
-      function pull(){return fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(p){var arr=(p&&Array.isArray(p.records))?p.records:[];state.records=sortRecords(arr.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cloud (auto-refresh every minute).';render();});}
-      pull().catch(function(e){state.records=state.records||[];state.source='Cloud load failed. Latest cloud data unavailable. '+e.message;render();});
-      setInterval(function(){pull().catch(function(){});},60000);
+      // B) 正常打开：先显示 localStorage 缓存，后台从云端拉新数据，每3分钟自动刷新
+      var CACHE_KEY='d3-pantry-cache';
+      function loadCache(){try{var c=localStorage.getItem(CACHE_KEY);if(c){var d=JSON.parse(c);if(d&&Array.isArray(d.records)){state.records=sortRecords(d.records.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cache. Refreshing...';render();}}}catch(e){}}
+      function saveCache(p){try{localStorage.setItem(CACHE_KEY,JSON.stringify(p));}catch(e){}}
+      function pull(){return fetch(P+'?t='+Date.now(),{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(p){var arr=(p&&Array.isArray(p.records))?p.records:[];saveCache({records:arr});state.records=sortRecords(arr.map(normalizeRecord).filter(Boolean));state.source='Loaded '+state.records.length+' record(s) from cloud (auto-refresh every 3 min).';render();});}
+      loadCache();
+      pull().catch(function(e){state.records=state.records||[];state.source='Cloud load failed. Showing cached data. '+e.message;render();});
+      setInterval(function(){pull().catch(function(){});},180000);
       // C) 在线导入(拖/选/粘贴 JSON)时，自动同步到云端 → 老板网址实时更新
       if(typeof window.mergeIncoming==='function'){
         var _mi=window.mergeIncoming;
@@ -2961,7 +3038,7 @@ function escapeAttribute(value) {
     </script>
     <script>
 (function () {
-  // 💰 利润 / 平台对比页 —— 公式逆向自 Market Price List.xlsx (Samsung sheet)，仅手机
+  // Shopee-only platform profit calculator.
   const PROFIT_MODELS = [
     { model: "A06 4+128 4G (A065)", csp: 382, adsPct: 0.02 },
     { model: "A06 6+128 5G (A066)", csp: 584, adsPct: 0.02 },
@@ -2995,21 +3072,18 @@ function escapeAttribute(value) {
     { model: "S26 ULTRA 12+512 (S948)", csp: 5869, adsPct: 0.03 },
     { model: "S26 ULTRA 16+1TB (S948)", csp: 6989, adsPct: 0.03 },
   ];
-  const COM_S = 0.1026, COM_L = 0.1836, SST = 1.08; // Shopee/Lazada 佣金 + 8% SST
-  const PCSP_K = 'd3-profit-csp-v1', PCSPL_K = 'd3-profit-cspl-v1';
+  const COM_S = 0.1026, CCB_NORMAL = 0.055, CCB_DDAY = 0.075, ADS = 0.03, SST = 1.08;
+  const PCSP_K = 'd3-profit-csp-v1';
   const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch { return d; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
-  let cspO = load(PCSP_K, {}), cspLO = load(PCSPL_K, {});
+  let cspO = load(PCSP_K, {});
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const fmt = (v) => (v == null || !isFinite(v)) ? '—' : 'RM' + Number(v).toFixed(2).replace(/\.00$/, '');
-  const ccb = (csp, rate) => Math.min(csp * rate * SST, 108);                                   // CCB 封顶 RM108
-  const takeBackS = (csp, adsPct, dday) => csp - csp * COM_S - ccb(csp, dday ? 0.075 : 0.055) - csp * adsPct * SST;
-  const takeBackL = (cspL) => cspL * (1 - COM_L);
-  const suggestCspL = (csp, adsPct) => csp + csp * 0.0756 - ccb(csp, 0.055) - csp * adsPct * SST; // J 列建议价
+  const ccb = (csp, rate) => Math.min(csp * rate * SST, 108);
+  const shopeeProfit = (csp, dday) => csp - csp * COM_S - ccb(csp, dday ? CCB_DDAY : CCB_NORMAL) - csp * ADS * SST;
 
-  // 利润表借用 boss-table 的 Excel 风格，但取消「倒数第二列吃剩余」那条规则
   const stl = document.createElement('style');
-  stl.textContent = '@media(min-width:768px){.profit-table th:nth-last-child(2),.profit-table td:nth-last-child(2){width:1px;text-align:right;padding-left:12px}}';
+  stl.textContent = '.profit-table{width:100%;table-layout:fixed}.profit-table th:nth-child(1),.profit-table td:nth-child(1){width:35%}.profit-table th:nth-child(2),.profit-table td:nth-child(2){width:15%}.profit-table th:nth-child(3),.profit-table td:nth-child(3){width:25%}.profit-table th:nth-child(4),.profit-table td:nth-child(4){width:25%}.profit-table th,.profit-table td{white-space:normal}.profit-table .ourprice-input{width:100%;max-width:120px}';
   document.head.appendChild(stl);
 
   const sec = document.createElement('section');
@@ -3021,38 +3095,26 @@ function escapeAttribute(value) {
   function render() {
     const rows = PROFIT_MODELS.map((m) => {
       const csp = cspO[m.model] != null ? cspO[m.model] : m.csp;
-      const cspL = cspLO[m.model] != null ? cspLO[m.model] : Math.round(suggestCspL(csp, m.adsPct)); // 默认建议价，可手改
-      const tbS = takeBackS(csp, m.adsPct, false);
-      const tbSd = takeBackS(csp, m.adsPct, true);
-      const tbL = takeBackL(cspL);
-      const diff = tbL - tbS; // 正=Lazada 实拿更多
-      const winner = Math.abs(diff) < 0.005 ? '<span class="muted">同</span>'
-        : (diff > 0 ? `<span class="gap-up">Lazada +${fmt(diff)}</span>` : `<span class="gap-down">Shopee +${fmt(-diff)}</span>`);
+      const profit = shopeeProfit(csp, false);
+      const profitDday = shopeeProfit(csp, true);
       return '<tr>' +
         `<td><strong>${esc(m.model)}</strong></td>` +
         `<td><input class="ourprice-input" data-pcsp="${esc(m.model)}" type="number" inputmode="decimal" value="${csp}"></td>` +
-        `<td><input class="ourprice-input" data-pcspl="${esc(m.model)}" type="number" inputmode="decimal" value="${cspL}"></td>` +
-        `<td class="price-num">${fmt(tbS)}</td>` +
-        `<td class="price-num">${fmt(tbSd)}</td>` +
-        `<td class="price-num">${fmt(tbL)}</td>` +
-        `<td>${winner}</td>` +
+        `<td class="price-num">${fmt(profit)}</td>` +
+        `<td class="price-num">${fmt(profitDday)}</td>` +
         '</tr>';
     }).join('');
     sec.innerHTML =
-      '<h2>💰 利润 / 平台对比</h2>' +
-      '<p class="muted" style="margin-top:6px">填 Shopee 标价(CSP) 和 Lazada 标价(CSP·L)，自动算扣完 佣金+CCB+广告费 后实拿，比哪个平台更赚。费率：Shopee 10.26% / Lazada 18.36% / CCB=标价×5.5%(平日) 或 7.5%(D-Day) ×1.08SST 封顶RM108 / Ads 3%×1.08(A06系列2%)。CSP·L 默认是建议价(可手改)。数据源 Market Price List.xlsx。注意：这是「平台实拿」对比，不含进货成本，不是净利润。</p>' +
+      '<h2>Platform Profit Calculator</h2>' +
+      '<p class="muted" style="margin-top:6px">Enter Shopee CSP price and the system will calculate estimated Shopee net profit after commission, CCB fee, ads fee and SST.</p>' +
+      '<p class="muted" style="margin-top:6px">Shopee Commission: 10.26%<br>CCB Fee: 5.5% (Normal Day) / 7.5% (D-Day)<br>Ads Cost: 3%<br>SST: 8%</p>' +
       '<div style="overflow-x:auto"><table class="boss-table profit-table"><thead><tr>' +
-      '<th>Model</th><th>CSP (S)</th><th>CSP (L)</th><th>Shopee 实拿 平日</th><th>Shopee 实拿 D-Day</th><th>Lazada 实拿</th><th>👑 更赚平台</th>' +
+      '<th>Model</th><th>CSP</th><th>Shopee Profit</th><th>Shopee D-Day</th>' +
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
     sec.querySelectorAll('input[data-pcsp]').forEach((el) => { el.onchange = () => {
       const m = el.dataset.pcsp, v = Number(el.value);
       if (el.value === '' || !isFinite(v)) delete cspO[m]; else cspO[m] = v;
       save(PCSP_K, cspO); render();
-    }; });
-    sec.querySelectorAll('input[data-pcspl]').forEach((el) => { el.onchange = () => {
-      const m = el.dataset.pcspl, v = Number(el.value);
-      if (el.value === '' || !isFinite(v)) delete cspLO[m]; else cspLO[m] = v;
-      save(PCSPL_K, cspLO); render();
     }; });
   }
   render();

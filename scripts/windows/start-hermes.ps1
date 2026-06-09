@@ -34,4 +34,14 @@ if (-not $env:HERMES_CDP_FETCH_RETRY_DELAY_MS) {
   $env:HERMES_CDP_FETCH_RETRY_DELAY_MS = "5000"
 }
 
-node .\src\hermes.mjs
+$nodeDir = Join-Path $env:ProgramFiles "nodejs"
+if (Test-Path (Join-Path $nodeDir "node.exe")) {
+  $env:Path = "$nodeDir;$env:Path"
+}
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+  throw "Node.js not found. Install Node.js LTS or add node.exe to PATH."
+}
+
+& $node.Source .\src\hermes.mjs
