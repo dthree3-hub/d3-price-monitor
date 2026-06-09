@@ -90,18 +90,33 @@ https://d3-price-seven.vercel.app
 
 ## 7. 数据源
 
-**当前线上数据源：Pantry 云端 JSON**
+**当前线上数据源：JSONBin.io（2026-06-09 从 Pantry 迁移）**
 
+### 前端读取（Claude 已改好）
 ```
-https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3
+GET https://d3-price-seven.vercel.app/api/data
 ```
-
+- 前端通过 Vercel API proxy 读取，Master Key 存在 Vercel env var `JSONBIN_KEY`，**不在前端代码里**
 - 前端每 **3 分钟**自动 fetch 一次
-- 前端有 **localStorage 缓存**（key: `d3-pantry-cache`）：打开页面立即显示上次缓存，后台刷新后静默更新
-- Hermes 抓取后直接 POST 写入 Pantry
+- 前端有 **localStorage 缓存**（key: `d3-records-cache`）：打开页面立即显示上次缓存
 
-> `/data/records.json` 是 Vercel 部署目录里的本地文件，**不是当前线上数据源**，
-> 前端 Pantry 脚本会覆盖掉它读取的数据。
+### Hermes 写入（⚠️ Codex 需要改）
+```
+旧 Pantry（已废弃，HTTP 522 挂掉）：
+  POST https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3
+  Body: { "records": [...] }
+
+新 JSONBin（Codex 改这里）：
+  PUT https://api.jsonbin.io/v3/b/6a277a33f5f4af5e29cf0375
+  Headers:
+    X-Master-Key: <见 Vercel env var JSONBIN_KEY，或向加恩索取>
+    Content-Type: application/json
+  Body: { "records": [...] }
+```
+- JSONBin 用 **PUT**（不是 POST），每次 PUT 都覆盖整个 bin
+- 保留最新 120 条规则不变，Hermes 自行 trim 后 PUT
+
+> `/data/records.json` 是 Vercel 部署目录里的本地文件，**不是当前线上数据源**。
 
 ---
 
@@ -216,6 +231,18 @@ C:\D3\scripts\windows\start-hermes.ps1        # 常驻抓取
 | Set A 修复 | Claude | `canonTier` 新增 `t === 'a'` → SET A |
 | Vercel 迁移 | Claude | 公司账号 d3-s-projects，URL: d3-price-seven.vercel.app |
 | SSOT 建立 | Claude | 本文件 |
+
+---
+
+## 16. 2026-06-09 迁移变更记录（JSONBin）
+
+| 变更 | 负责方 | 内容 |
+|------|--------|------|
+| 数据源迁移 | Claude | Pantry → JSONBin（Pantry HTTP 522 挂掉） |
+| Vercel API proxy | Claude | `d3-price/api/data.js`，GET/POST/PUT 三种操作 |
+| 环境变量 | Claude | `JSONBIN_KEY` 已加到 Vercel production env |
+| 前端读取 URL | Claude | `P='/api/data'`，CACHE_KEY 改 `d3-records-cache` |
+| Hermes 写入 | **Codex 待做** | 见第 7 节"Hermes 写入"，改成 PUT JSONBin |
 
 ---
 
