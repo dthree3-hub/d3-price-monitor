@@ -60,6 +60,7 @@ function normalizeScrapedProduct(product, scraped) {
     sellerName: scraped.sellerName || product.competitor || '',
     title: scraped.title,
     currency: 'MYR',
+    voucherAmount: toNonNegativeNumberOrZero(scraped.voucherAmount),
     variants: scraped.variants.map((variant) => ({
       name: variant.variant,
       ...parseVariantDescriptor(variant.variant, {
@@ -121,6 +122,7 @@ async function scrapeOne(product, mode) {
     sellerName: result.sellerName || product.competitor || '',
     title: result.title,
     currency: 'MYR',
+    voucherAmount: 0,
     variants: result.variants.map((variant) => ({
       name: variant.variant,
       currentPrice: variant.current,
@@ -130,6 +132,11 @@ async function scrapeOne(product, mode) {
       inStock: !variant.sold_out,
     })),
   }, product);
+}
+
+function toNonNegativeNumberOrZero(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 async function scrapeOneWithRetry(product, mode) {

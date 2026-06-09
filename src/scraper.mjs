@@ -108,6 +108,7 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   const page = await ctx.newPage();
 
   let pdpJson = null;
+  let voucherAmount = 0;
   const seenApi = []; // 调试：记下看到的所有 api/v4 请求
   // 拦截页面自己发的商品详情接口
   page.on('response', async (res) => {
@@ -148,6 +149,7 @@ export async function scrapeProduct(url, { headless = true } = {}) {
       } catch {}
     }
     try { await ctx.storageState({ path: STATE_FILE }); } catch {}
+    voucherAmount = await extractVoucherAmountFromPage(page);
   } finally {
     // 截图留证（看是不是被验证码挡了）
     try { await page.screenshot({ path: 'out/last-page.png', fullPage: false }); } catch {}
@@ -163,7 +165,7 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   if (!result?.variants) {
     throw new Error('Shopee 返回了非商品数据，可能已掉登录态或被软拦截。');
   }
-  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, scrapedAt: new Date().toISOString() };
+  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, scrapedAt: new Date().toISOString() };
 }
 
 export async function scrapeProductViaCDP(url, {
@@ -247,6 +249,7 @@ export async function scrapeProductViaCDP(url, {
       throw new Error('CDP 页面当前为 Page Unavailable。');
     }
 
+    const voucherAmount = await extractVoucherAmountFromRuntime(Runtime);
     const fetchResult = await evaluateJson(Runtime, buildPdpFetchExpression(ids));
     try {
       if (fetchResult) fs.writeFileSync('out/pdp-raw.json', JSON.stringify(fetchResult, null, 2));
@@ -269,7 +272,7 @@ export async function scrapeProductViaCDP(url, {
       throw new Error('CDP 抓取到的不是商品价格数据，可能当前 Chrome 里的 Shopee 没登录或被软拦截。');
     }
 
-    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, scrapedAt: new Date().toISOString() };
+    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, scrapedAt: new Date().toISOString() };
   } finally {
     try { if (client) await client.close(); } catch {}
     try {
@@ -346,6 +349,49 @@ async function evaluateJson(Runtime, expression) {
     returnByValue: true,
   });
   return response?.result?.value ?? null;
+}
+
+function normalizeVoucherAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+async function extractVoucherAmountFromPage(page) {
+  try {
+    return normalizeVoucherAmount(await page.evaluate(buildVoucherAmountExpression()));
+  } catch {
+    return 0;
+  }
+}
+
+async function extractVoucherAmountFromRuntime(Runtime) {
+  try {
+    return normalizeVoucherAmount(await evaluateJson(Runtime, buildVoucherAmountExpression()));
+  } catch {
+    return 0;
+  }
+}
+
+function buildVoucherAmountExpression() {
+  return String.raw`
+    (() => {
+      let best = 0;
+      const allEls = [
+        ...document.querySelectorAll('[class*="voucher"], [class*="Voucher"]'),
+        ...Array.from(document.querySelectorAll('*')).filter((el) => {
+          const text = String(el.textContent || '');
+          return el.children.length === 0 &&
+            /RM\s*\d+\s*(off|OFF)/i.test(text) &&
+            text.length < 80;
+        })
+      ];
+      allEls.forEach((el) => {
+        const m = String(el.textContent || '').match(/RM\s*(\d+(?:\.\d+)?)\s*(?:off|OFF)/i);
+        if (m) best = Math.max(best, parseFloat(m[1]));
+      });
+      return best;
+    })()
+  `;
 }
 
 function buildHealthCheckExpression() {

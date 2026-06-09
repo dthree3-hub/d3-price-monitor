@@ -349,6 +349,7 @@ JSONBin Free Plan 单 bin 限制 100KB，实际 payload 938KB → HTTP 403。决
 | A 系列混卖归类规则 | Codex | variant 网络制式优先，避免 `4G/LTE` variant 被 `our_product` 误归到 5G 型号 |
 | Tier 标准化 | Codex | cloud retry uploader 上传前补齐 `A/B/C`、`Offer→Promo`、`Offer(Gift Set)→Promo(Gift Set)` |
 | Urban Republic tier | Codex | UR 无 Set 档位；上传 D1 前空 tier 改为 RAM+容量/容量（如 `12GB+256GB` / `256GB`），取不到才用 `Basic`，避免 D1 `(shop,item,model,tier)` 唯一键覆盖容量 |
+| Shop Voucher 抓取 | Codex | Hermes CDP/browser 抓取商品页时读取 DOM voucher 区块，record 写入 `voucherAmount`（最大 `RM X off`，无券为 0），供 Worker/D1/前端后续计算到手价 |
 
 ---
 
