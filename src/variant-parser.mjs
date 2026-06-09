@@ -153,6 +153,8 @@ export function parseVariantDescriptor(rawName, context = {}) {
       : (/\b4g\b/i.test(name) ? '4G' : '')));
     if (tabNet) model = `${model} ${tabNet}`;
   }
+  // 统一平板带 "Tab" 前缀（A11 / S10 / S11 系列），避免 "S11 Ultra" 与 "Tab S11 Ultra" 拆成两行。
+  if (/^(A11|S1\d)\b/i.test(model) && !/^Tab\b/i.test(model)) model = `Tab ${model}`;
 
   let capacity = normalizeCapacity(name);
   if (!capacity) capacity = masterCapacityFor(model, name, title);
