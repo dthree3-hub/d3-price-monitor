@@ -249,8 +249,23 @@ export async function scrapeProductViaCDP(url, {
       throw new Error('CDP 页面当前为 Page Unavailable。');
     }
 
-    const voucherAmount = await extractVoucherAmountFromRuntime(Runtime);
-    const fetchResult = await evaluateJson(Runtime, buildPdpFetchExpression(ids));
+    // 被反爬拦(如 90309999)时：重载页面、等反爬 JS 跑完，再读一次。只有被拦的链接才慢，正常的不受影响。
+    const ANTIBOT_RETRY = Number(process.env.HERMES_CDP_ANTIBOT_RETRY || 2);
+    let voucherAmount = 0;
+    let fetchResult = null;
+    for (let attempt = 0; attempt <= ANTIBOT_RETRY; attempt += 1) {
+      voucherAmount = await extractVoucherAmountFromRuntime(Runtime);
+      fetchResult = await evaluateJson(Runtime, buildPdpFetchExpression(ids));
+      const antiBotCode = fetchResult?.payload?.error;
+      if (antiBotCode && antiBotCode !== 0 && attempt < ANTIBOT_RETRY) {
+        console.error(`[scraper] 被反爬拦 (${antiBotCode})，重载等待后重试 ${attempt + 1}/${ANTIBOT_RETRY}: ${url}`);
+        await Page.reload({ ignoreCache: true });
+        await waitForPageLoad(Page, 15000).catch(() => {});
+        await sleep(5000 + attempt * 4000);
+        continue;
+      }
+      break;
+    }
     try {
       if (fetchResult) fs.writeFileSync('out/pdp-raw.json', JSON.stringify(fetchResult, null, 2));
     } catch {}
