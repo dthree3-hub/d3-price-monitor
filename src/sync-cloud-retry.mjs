@@ -261,12 +261,17 @@ async function putJsonWithTimeout(url, payload, timeoutMs, extraHeaders = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
   try {
+    console.log('JSONBin URL:', url);
+    console.log('Has API Key:', !!extraHeaders['X-Master-Key']);
     const response = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...extraHeaders },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
+    const responseText = await response.text();
+    console.log('JSONBin Status:', response.status);
+    console.log('JSONBin Response:', responseText.slice(0, 500));
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -295,6 +300,8 @@ export async function syncLatestCloudRecords(options = {}) {
 
   const payload = buildCloudPayload(records, Number.isFinite(maxRecords) && maxRecords > 0 ? maxRecords : 120);
   const bytes = Buffer.byteLength(JSON.stringify(payload));
+  console.log('Records count:', records?.length);
+  console.log('Payload size:', JSON.stringify(payload).length);
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
