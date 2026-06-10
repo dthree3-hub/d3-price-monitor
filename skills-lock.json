@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "shopee-product-detail": {
+      "source": "/home/dthree3/d3-price-monitor/shopee-product-skill",
+      "sourceType": "local",
+      "computedHash": "abb0604cb4f06f097886c272f5657070e619f6002ae9c161a2f8191f103d3b62"
+    }
+  }
+}

@@ -19,10 +19,11 @@ function rowsToRecords(rows) {
         itemId: r.item_id,
         title: r.title,
         grabbedAt: r.grabbed_at,
-        soldOut: !!r.sold_out,
+        soldOut: false, // 下面按逐款重算
         variants: [],
       });
     }
+    const soldOut = !!r.sold_out; // sold_out 列现为逐款标记
     map.get(key).variants.push({
       model: r.model,
       capacity: r.capacity,
@@ -30,7 +31,13 @@ function rowsToRecords(rows) {
       currentPrice: r.price,
       name: r.sku,
       voucherAmount: r.voucher_amount ?? 0,
+      soldOut,
+      inStock: !soldOut,
     });
+  }
+  // 整个 listing 售罄 = 所有款式都售罄（兼容旧的「记录级 soldOut」语义）
+  for (const rec of map.values()) {
+    rec.soldOut = rec.variants.length > 0 && rec.variants.every((v) => v.soldOut);
   }
   return Array.from(map.values());
 }
@@ -104,8 +111,8 @@ export default {
             `).bind(
               rec.shopId, rec.itemId, rec.title || '', sku,
               v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
-              rec.voucherAmount ?? 0,
-              rec.soldOut ? 1 : 0,
+              v.voucherAmount ?? rec.voucherAmount ?? 0,
+              (v.inStock === false || rec.soldOut) ? 1 : 0,
               rec.grabbedAt || new Date().toISOString()
             )
           );

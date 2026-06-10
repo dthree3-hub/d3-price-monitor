@@ -1,5 +1,5 @@
 const MODEL_PATTERNS = [
-  { regex: /\bA0?(\d{1,2})\s*(5G|LTE|4G)?\b/i, map: (_, num, suffix) => `A${String(num).padStart(2, '0')}${suffix ? ` ${suffix.toUpperCase()}` : ''}` },
+  { regex: /\bA0?(\d{1,2})\s*(\+|Plus)?\s*(5G|LTE|4G)?\b/i, map: (_, num, plus, net) => `A${String(num).padStart(2, '0')}${plus ? '+' : ''}${net ? ` ${net.toUpperCase()}` : ''}` },
   { regex: /\bS\s*(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?\b/i, map: (_, num, suffix) => `S${num}${suffix ? (suffix === '+' ? '+' : suffix.toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}` },
   { regex: /\b(?:Z\s*)?(Flip|Fold)\s*(\d)\s*(FE)?/i, map: (_, family, num, fe) => `Z ${family[0].toUpperCase()}${family.slice(1).toLowerCase()} ${num}${fe ? ' FE' : ''}` },
   { regex: /\bTab\s*(A\d+|S\d+\s*(?:FE|Lite|Ultra)?)\b/i, map: (_, model) => `Tab ${String(model).replace(/\s+/g, ' ').trim()}` },
@@ -21,7 +21,7 @@ function normalizeSpaces(text) {
 
 function normalizeCapacity(raw) {
   const text = normalizeSpaces(raw).replace(/[()]/g, '');
-  const withoutModel = text.replace(/^A0?\d{1,2}(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '').replace(/^(?:Tab\s*)?S1\d\s*(?:Ultra|U(?![A-Za-z])|FE\s*\+?|Lite|\+|Plus)?/i, '').trim();
+  const withoutModel = text.replace(/^A0?\d{1,2}\s*(?:\+|Plus)?\s*(?:5G|4G|LTE)?/i, '').replace(/^S2\d(?:Ultra|U(?![A-Za-z])|\+|Plus)?/i, '').replace(/^(?:Tab\s*)?S1\d\s*(?:Ultra|U(?![A-Za-z])|FE\s*\+?|Lite|\+|Plus)?/i, '').trim();
   const source = withoutModel && withoutModel !== text ? withoutModel : text;
   const ramRom = source.match(/(\d+)\s*(?:GB|TB)?\s*\+\s*(\d+)\s*(GB|TB)?/i);
   if (ramRom) return `${ramRom[1]}+${ramRom[2]}${(ramRom[3] || 'GB').toUpperCase()}`;
@@ -60,8 +60,11 @@ function masterCapacityFor(model, name, title) {
 function extractTier(text) {
   const raw = normalizeSpaces(text);
   if (!raw) return '';
-  if (/promo/i.test(raw)) return raw.match(/promo(?:\s*\(gift set\)|\s*\d+)?/i)?.[0] || 'Promo';
-  if (/basic/i.test(raw)) return raw.match(/basic(?:\s*\d+)?/i)?.[0] || 'Basic';
+  if (/promo/i.test(raw)) {
+    const gift = raw.match(/promo\s*\(gift set\)/i);
+    return gift ? gift[0] : 'Promo'; // Promo / Promo1 / Promo 2 … → 统一归 Promo;Gift Set 保留单独
+  }
+  if (/basic/i.test(raw)) return 'Basic'; // Basic / Basic1 … → 统一归 Basic
   if (/gift\s*set|gift/i.test(raw)) return raw.match(/gift(?:\s*set|\s*\d+)?/i)?.[0] || 'Gift';
   if (/set\s*[a-z0-9]+/i.test(raw)) return raw.match(/set\s*[a-z0-9]+/i)?.[0] || raw;
   if (/standard/i.test(raw)) return 'Standard';
@@ -73,8 +76,8 @@ function extractModel(text) {
   // 剥掉赠品后缀如 "(+Buds Core)" / "(+ 15W Charger)"：以 + 开头的括号是赠品，不是型号；
   // 不碰容量括号 "(12+256)"（以数字开头）。否则手机会被误判成 Buds Core 等赠品名。
   const source = normalizeSpaces(String(text || '').replace(/\(\s*\+[^)]*\)/g, ' '));
-  let compact = source.match(/^A(0?\d{1,2})\s*(5G|4G|LTE)?/i);
-  if (compact) return `A${String(compact[1]).padStart(2, '0')}${compact[2] ? ` ${compact[2].toUpperCase()}` : ''}`;
+  let compact = source.match(/^A(0?\d{1,2})\s*(\+|Plus)?\s*(5G|4G|LTE)?/i);
+  if (compact) return `A${String(compact[1]).padStart(2, '0')}${compact[2] ? '+' : ''}${compact[3] ? ` ${compact[3].toUpperCase()}` : ''}`;
   compact = source.match(/^S(2\d)\s*(Ultra|U(?![A-Za-z])|\+|Plus)?/i);
   if (compact) return `S${compact[1]}${compact[2] ? (compact[2] === '+' ? '+' : compact[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
   // 平板 S 系列（S10/S11）：variant 名常无 "Tab" 前缀，"U" 缩写 = Ultra（如 S11U = S11 Ultra）；

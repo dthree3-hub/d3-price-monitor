@@ -4,6 +4,38 @@
 
 ---
 
+## 2026-06-10
+
+### 删除「Price drop report」区域
+- **文件**：`d3-price/index.html`
+- **改了什么**：移除整个 `Price drop report` section（含 Last updated / Largest drop 指标和降价列表），删掉 `buildDropReport`/`renderDropList`/`toMalaysiaTime` 及相关元素声明。无用的 `.report-*` CSS 保留（不匹配任何元素，无害）。
+- **为什么**：老板视图用不到这个降价历史区域，Leon 要求删除。
+
+### 逐款售罄（不可选的款式当售罄，不再显示价格）
+- **文件**：`d3-worker/src/index.js`、`d3-price/index.html`
+- **改了什么**：`sold_out` 列从「整个 listing 售罄」改成**逐款标记**（upsert bind 改 `v.inStock===false || rec.soldOut`）；Worker `rowsToRecords` 给每个 variant 带 `soldOut/inStock`，记录级 soldOut 改为「所有款都售罄」推导。前端 `normalizeVariant` 透传逐款 `soldOut`（兼容 inStock 形状、缺失不误判），`build()` 把逐款售罄当成不计价、标 Sold Out（自家缺货款也不计入「我们的价」）。
+- **为什么**：某 listing 10 个款式有 3 个卖完(不可选)，但网页仍显示它们的价格，应标售罄。scraper 早已按 `mdl.stock===0` 逐款标 sold_out，缺的是存储和前端只用了整单售罄。
+- **善后**：需重部署 worker+vercel + 清 D1 重抓。
+
+### 百分比/额外/满减 voucher 全链路（按款式精确算）
+- **文件**：`src/scraper.mjs`、`src/runOnce.mjs`、`d3-worker/src/index.js`、`d3-price/index.html`、`.agents/skills/shopee-product-detail/scripts/extract-shopee-product.py`、D1
+- **改了什么**：
+  - scraper DOM 提取从只认 `RM N off` 扩成每张券带回 `{fixed, percent, minSpend}`（`buildVoucherInfoExpression`/`normalizeVoucherInfo`），认 `N% off` 和 `Min. spend RM X` 满减门槛；接口无门槛固定额券(type1)合并进券列表（`mergeApiFixedVoucher`），百分比/满减以 DOM 文字为准。scraper 返回值新增 `vouchers` 数组。
+  - runOnce 新增 `variantVoucherAmount(price, vouchers)`：逐款挑最优券——满减券只在该款价格 ≥ 门槛时生效，百分比取 `percent×该款价格`（5%×527≠5%×999），多张取折扣最大者，写进 `variant.voucherAmount`。记录级 `voucherAmount` 仅存无门槛固定额。
+  - Worker upsert 改用 `v.voucherAmount ?? rec.voucherAmount ?? 0`（per-variant 优先）。
+  - 前端 `normalizeVariant` 透传 `voucherAmount`；`build()` 的 effectivePrice 改成「逐款 voucher 优先，没有才回退每店设置」。
+  - 顺手修 `shopee-product-detail` skill 的 bug：原本百分比券抓到却没算进 effectivePrice，改成每款取最优券（固定额 vs %×价），并识别 `Min. spend` 满减门槛、带回 per-variant `voucherAmount`，与生产逻辑一致。
+- **为什么**：百分比券（如 Spray Gadget A06 5G 的 5% OFF）、额外固定券（如 RM50 off）、满减券（满 RM500 减 RM10）原本两条提取路径都漏或算错（满减券会无视门槛对所有款式硬扣），网页对比价不准。
+- **善后**：需 `cd d3-worker && npm run deploy`、`cd d3-price && npx vercel --prod --yes`、清 D1 重抓一圈（voucher 值变了）。
+
+### A11+ 的 "+" 不再丢失
+- **文件**：`src/variant-parser.mjs`
+- **改了什么**：`extractModel` 与 MODEL_PATTERNS 的 A 系列正则在型号数字后加了可选 `(\+|Plus)` 捕获组，`A11+WiFi(6+128)` / `A11 PLUS` 解析为 `Tab A11+ WiFi`（原本丢 + 变 `Tab A11`）；`normalizeCapacity` 剥型号时同步跳过 `+/Plus`，不影响 `6+128` 容量解析。普通 A11、A06 等无回归。
+- **为什么**：A11 与 A11+ 是不同型号（RAM 4 vs 6），名字里有 "+"/"PLUS" 时应保留以区分。
+- **善后**：型号 key 变了，需清 D1 重抓（见 [[d3-runbook]] 规则）。
+
+---
+
 ## 2026-06-09
 
 ### 售罄(Sold Out)全链路 + 平板统一 Tab 前缀 + 只看低过我们按钮

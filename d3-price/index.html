@@ -459,22 +459,6 @@
         </div>
       </section>
 
-      <section class="report-wrap">
-        <h2 style="margin:0">Price drop report</h2>
-        <p class="muted" style="margin-top:6px">Compare the latest two captures for the same `shop_id + item_id + variant` and list the price drops.</p>
-        <div class="metrics">
-          <div class="metric">
-            <span class="muted">Last updated (Malaysia)</span>
-            <strong id="metricDrops" style="font-size:18px">-</strong>
-          </div>
-          <div class="metric">
-            <span class="muted">Largest drop</span>
-            <strong id="metricMaxDrop">-</strong>
-          </div>
-        </div>
-        <div id="dropList" class="report-list"></div>
-      </section>
-
       <section class="table-wrap">
         <div class="table-bar">
           <div>
@@ -1550,14 +1534,11 @@ const tableToggle = document.getElementById('tableToggle');
 const tablePanel = document.getElementById('tablePanel');
 const tableSummary = document.getElementById('tableSummary');
 const tableBody = document.getElementById('tableBody');
-const dropList = document.getElementById('dropList');
 
 const metricProducts = document.getElementById('metricProducts');
 const metricVariants = document.getElementById('metricVariants');
 const metricShops = document.getElementById('metricShops');
 const metricLatest = document.getElementById('metricLatest');
-const metricDrops = document.getElementById('metricDrops');
-const metricMaxDrop = document.getElementById('metricMaxDrop');
 const DEFAULT_VOUCHER_DISCOUNT = 5;
 const SHOP_ROLE_BY_SHOP = {
   '116917349': 'A',
@@ -1927,6 +1908,9 @@ function normalizeVariant(variant, context = {}) {
     promoPrice: toNumberOrNull(variant.promoPrice),
     stock: variant.stock == null ? null : Number(variant.stock),
     inStock: Boolean(variant.inStock),
+    // worker 发 soldOut；本地/sync 数据是 inStock。inStock 缺失(undefined)时不当售罄。
+    soldOut: variant.soldOut === true || variant.inStock === false,
+    voucherAmount: toNumberOrNull(variant.voucherAmount) ?? 0,
   };
 }
 
@@ -2300,47 +2284,6 @@ function downloadFile(name, body, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function buildDropReport(records) {
-  const byVariant = new Map();
-
-  for (const record of records) {
-    for (const variant of record.variants) {
-      const key = variantIdentity(record, variant);
-      if (!byVariant.has(key)) byVariant.set(key, []);
-      byVariant.get(key).push({
-        grabbedAt: record.grabbedAt,
-        title: record.title,
-        sellerName: record.sellerName,
-        pageUrl: record.pageUrl,
-        shopId: record.shopId,
-        itemId: record.itemId,
-        variantName: variant.name,
-        currentPrice: variant.currentPrice,
-      });
-    }
-  }
-
-  const drops = [];
-  for (const history of byVariant.values()) {
-    history.sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime());
-    if (history.length < 2) continue;
-
-    const latest = history[0];
-    const previous = history[1];
-    if (latest.currentPrice == null || previous.currentPrice == null) continue;
-    if (latest.currentPrice >= previous.currentPrice) continue;
-
-    drops.push({
-      ...latest,
-      previousGrabbedAt: previous.grabbedAt,
-      previousPrice: previous.currentPrice,
-      dropAmount: Number((previous.currentPrice - latest.currentPrice).toFixed(2)),
-    });
-  }
-
-  return drops.sort((a, b) => b.dropAmount - a.dropAmount);
-}
-
 function buildChangeReport(records) {
   const byVariant = new Map();
 
@@ -2425,31 +2368,17 @@ function formatStatus(change) {
   return 'No change';
 }
 
-// UTC ISO → 马来西亚时间 (MYT, UTC+8) 显示
-function toMalaysiaTime(iso) {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '-';
-  const myt = new Date(d.getTime() + 8 * 3600 * 1000);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${myt.getUTCFullYear()}-${p(myt.getUTCMonth() + 1)}-${p(myt.getUTCDate())} ${p(myt.getUTCHours())}:${p(myt.getUTCMinutes())}`;
-}
 
 function render() {
   renderFilterOptions();
   renderDetailsPanel();
   const records = state.records;
   const rows = filteredRows();
-  const drops = buildDropReport(records);
 
   metricProducts.textContent = String(new Set(rows.map((row) => `${row.shopId}:${row.itemId}`)).size);
   metricVariants.textContent = String(rows.length);
   metricShops.textContent = String(new Set(rows.map((row) => row.shopId)).size);
   metricLatest.textContent = records[0]?.grabbedAt?.replace('T', ' ').replace('Z', ' UTC') || '-';
-  metricDrops.textContent = toMalaysiaTime(records[0]?.grabbedAt);
-  metricMaxDrop.textContent = drops.length ? formatRmDisplay(drops[0].dropAmount) : '-';
-
-  renderDropList(drops);
 
   if (!rows.length) {
     tableBody.innerHTML = `<tr><td colspan="9" class="muted">${escapeHtml(state.source)}</td></tr>`;
@@ -2483,26 +2412,6 @@ function render() {
           <td class="mono">${escapeHtml(sellerLabel(row))}<br>${escapeHtml(row.shopId)} / ${escapeHtml(row.itemId)}</td>
           <td><a href="${escapeAttribute(row.pageUrl)}" target="_blank" rel="noreferrer">Open product page</a></td>
         </tr>
-      `;
-    })
-    .join('');
-}
-
-function renderDropList(drops) {
-  if (!drops.length) {
-    dropList.innerHTML = `<div class="muted">${escapeHtml(state.source)} A drop report appears after the same variant has been captured at least twice.</div>`;
-    return;
-  }
-
-  dropList.innerHTML = drops
-    .map((drop) => {
-      return `
-        <article class="report-card">
-          <strong>${escapeHtml(drop.title)}</strong>
-          <div class="report-meta">${escapeHtml(drop.variantName)} · ${escapeHtml(sellerLabel(drop))}</div>
-          <div class="report-meta">${escapeHtml(formatRmDisplay(afterVoucher(drop.previousPrice)))} → ${escapeHtml(formatRmDisplay(afterVoucher(drop.currentPrice)))} (down ${escapeHtml(formatRmDisplay(drop.dropAmount))})</div>
-          <div class="report-meta">Last ${escapeHtml(drop.previousGrabbedAt)} | Current ${escapeHtml(drop.grabbedAt)}</div>
-        </article>
       `;
     })
     .join('');
@@ -2829,7 +2738,9 @@ function escapeAttribute(value) {
         // self(我们公司)是「我们的价」基准列，切到任何对手 tab 都要保留 → 豁免 bossRole 过滤；仍受搜索/系列/型号筛选
         if (typeof matchesCurrentFilters === 'function' && !matchesCurrentFilters(rowForFilters, role === 'self' ? { includeBossRole: false } : {})) continue;
         if (v.currentPrice == null) continue;
-        const effectivePrice = afterVoucher(v.currentPrice, voucherForRole(role));
+        // 逐款 voucher 优先(Hermes 已按该款价格算好固定额/百分比折扣)；没有才回退到每店设置。
+        const _vAmt = Number(v.voucherAmount) > 0 ? Number(v.voucherAmount) : voucherForRole(role);
+        const effectivePrice = afterVoucher(v.currentPrice, _vAmt);
         if (effectivePrice == null) continue;
         const ct = canonTier(v);
         if (!ct) continue; // 只统计 Promo / Basic
@@ -2841,7 +2752,10 @@ function escapeAttribute(value) {
         if (!_srcArr.some(s => s.shopId === r.shopId && s.itemId === r.itemId)) {
           _srcArr.push({ title: r.title, shopId: String(r.shopId), itemId: String(r.itemId), sellerName: r.sellerName || roleName(role), role });
         }
+        // 逐款售罄：整个 listing 售罄(r.soldOut) 或这个款式本身缺货/不可选(v.soldOut)
+        const vSold = r.soldOut || v.soldOut;
         if (role === 'self') {
+          if (vSold) continue; // 我们自己缺货的款不计入「我们的价」
           selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
           if (!selfTiers[mk]) selfTiers[mk] = {};
           selfTiers[mk][ct] = Math.min(selfTiers[mk][ct] == null ? Infinity : selfTiers[mk][ct], effectivePrice);
@@ -2849,8 +2763,8 @@ function escapeAttribute(value) {
         }
         const byRole = models.get(mk);
         if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {}, soldOut: false, hasStock: false };
-        if (r.soldOut) {
-          // 整个 listing 售罄：不计入价格/最低价，只标记 soldOut（仅当没有其他有货来源时才显示 Sold Out）
+        if (vSold) {
+          // 售罄款：不计入价格/最低价，只标记 soldOut（仅当没有其他有货来源时才显示 Sold Out）
           byRole[role].soldOut = true;
         } else {
           byRole[role].hasStock = true;

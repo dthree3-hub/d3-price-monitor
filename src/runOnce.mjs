@@ -51,7 +51,32 @@ function isRetriableCdpFetchError(error) {
   return text.includes('[cdp_fetch]') || text.includes('页面内 fetch 失败');
 }
 
+// 按款式价格算「该款最优 voucher 折扣(RM)」：在所有券里挑——
+//  · 满减门槛 minSpend：只有该款价格 ≥ 门槛才算这张券（价格未知时只算无门槛券）；
+//  · 折扣额：固定额取 fixed，百分比取 percent×该款价格（5%×527 ≠ 5%×999，必须逐款算）；
+//  · 多张券取折扣最大的那张。
+function variantVoucherAmount(price, vouchers) {
+  const list = Array.isArray(vouchers) ? vouchers : [];
+  const p = Number(price);
+  const priceKnown = Number.isFinite(p) && p > 0;
+  let best = 0;
+  for (const v of list) {
+    const minSpend = Number(v?.minSpend) || 0;
+    if (minSpend > 0) {
+      if (!priceKnown || p < minSpend) continue; // 不满足满减门槛
+    }
+    const fixed = Number(v?.fixed) || 0;
+    const percent = Number(v?.percent) || 0;
+    const pct = percent > 0 && priceKnown ? Math.round(p * (percent / 100) * 100) / 100 : 0;
+    const discount = Math.max(fixed, pct);
+    if (discount > best) best = discount;
+  }
+  return best;
+}
+
 function normalizeScrapedProduct(product, scraped) {
+  const voucherFixed = toNonNegativeNumberOrZero(scraped.voucherAmount);
+  const vouchers = Array.isArray(scraped.vouchers) ? scraped.vouchers : [];
   return attachCompetitorMeta({
     schemaVersion: 1,
     grabbedAt: scraped.scrapedAt || new Date().toISOString(),
@@ -61,7 +86,8 @@ function normalizeScrapedProduct(product, scraped) {
     sellerName: scraped.sellerName || product.competitor || '',
     title: scraped.title,
     currency: 'MYR',
-    voucherAmount: toNonNegativeNumberOrZero(scraped.voucherAmount),
+    // 记录级仅保留无门槛固定额(单一数字无法表达百分比/满减)；逐款折扣放在 variant.voucherAmount。
+    voucherAmount: voucherFixed,
     soldOut: Array.isArray(scraped.variants) && scraped.variants.length > 0 && scraped.variants.every((v) => v.sold_out),
     variants: scraped.variants.map((variant) => ({
       name: variant.variant,
@@ -75,6 +101,7 @@ function normalizeScrapedProduct(product, scraped) {
       promoPrice: variant.promo_price,
       stock: variant.stock,
       inStock: !variant.sold_out,
+      voucherAmount: variantVoucherAmount(variant.current, vouchers),
     })),
   }, product);
 }
@@ -101,6 +128,15 @@ async function syncCloudRecords(records) {
 
 async function scrapeOne(product, mode) {
   if (mode === 'cdp') {
+    // 开了 HERMES_RECOVERY=1：CDP 抓取被验证/登录/封锁页挡住时，自动走人工恢复流程
+    // （暂停→存现场→Telegram 通知→等人工→恢复会话→重跑）。默认关闭，行为不变。
+    if (process.env.HERMES_RECOVERY === '1') {
+      const { guardCdpScrape } = await import('./recovery/index.mjs');
+      const scraped = await guardCdpScrape(product.product_url, {
+        taskContext: { competitor: product.competitor || '', ourProduct: product.our_product || '' },
+      });
+      return normalizeScrapedProduct(product, scraped);
+    }
     const scraped = await scrapeProductViaCDP(product.product_url);
     return normalizeScrapedProduct(product, scraped);
   }

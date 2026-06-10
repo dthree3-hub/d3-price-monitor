@@ -94,6 +94,20 @@ export function extractFromPdp(json) {
   return { title, sellerName: String(sellerName || ''), variants };
 }
 
+// 从 PDP 接口读「店铺 voucher」(比抠页面文字可靠)。
+// 固定额(voucher_discount_type=1):微元 ÷ 100000 = RM。
+// 其它类型(如百分比 type=2):先原样带出、不换算(待真实样本校准),voucherAmount=0。
+export function extractShopVoucher(pdpJson) {
+  const pp = pdpJson?.data?.product_price || pdpJson?.payload?.data?.product_price;
+  const sv = pp?.final_price_info?.final_price_vouchers?.shop_voucher;
+  if (!sv) return null;
+  const type = Number(sv.voucher_discount_type);
+  const raw = Number(sv.voucher_discount) || 0;
+  const code = sv.voucher_code || '';
+  if (type === 1) return { voucherAmount: raw / 100000, voucherType: 'fixed', voucherRaw: raw, code };
+  return { voucherAmount: 0, voucherType: `type${type}`, voucherRaw: raw, code };
+}
+
 export async function scrapeProduct(url, { headless = true } = {}) {
   const ids = parseShopeeUrl(url);
   if (!ids) throw new Error('解析不出 shopId/itemId，链接格式不对：' + url);
@@ -108,7 +122,7 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   const page = await ctx.newPage();
 
   let pdpJson = null;
-  let voucherAmount = 0;
+  let voucherInfo = { vouchers: [], fixed: 0, percent: 0 };
   const seenApi = []; // 调试：记下看到的所有 api/v4 请求
   // 拦截页面自己发的商品详情接口
   page.on('response', async (res) => {
@@ -149,7 +163,10 @@ export async function scrapeProduct(url, { headless = true } = {}) {
       } catch {}
     }
     try { await ctx.storageState({ path: STATE_FILE }); } catch {}
-    voucherAmount = await extractVoucherAmountFromPage(page);
+    voucherInfo = await extractVoucherInfoFromPage(page);
+    // 合并接口无门槛固定额券；百分比/满减以 DOM 文字为准。
+    const _sv = extractShopVoucher(pdpJson);
+    voucherInfo = { ...voucherInfo, vouchers: mergeApiFixedVoucher(voucherInfo.vouchers, _sv) };
   } finally {
     // 截图留证（看是不是被验证码挡了）
     try { await page.screenshot({ path: 'out/last-page.png', fullPage: false }); } catch {}
@@ -165,7 +182,9 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   if (!result?.variants) {
     throw new Error('Shopee 返回了非商品数据，可能已掉登录态或被软拦截。');
   }
-  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, scrapedAt: new Date().toISOString() };
+  const vouchers = voucherInfo.vouchers;
+  const voucherAmount = bestUnconditionalFixed(vouchers);
+  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, vouchers, scrapedAt: new Date().toISOString() };
 }
 
 export async function scrapeProductViaCDP(url, {
@@ -183,6 +202,9 @@ export async function scrapeProductViaCDP(url, {
   let browserClient = null;
   let target = null;
   let createdTarget = false;
+  // 复用模式(默认开):专用 CDP Chrome 上只保留一个 tab 反复导航、只关多余的。
+  // 跑完不关「在用的那个」,下次还能复用 → tab 收敛到 1 个。设 HERMES_CDP_REUSE_TAB=0 退回旧行为。
+  const reuseTab = process.env.HERMES_CDP_REUSE_TAB !== '0';
 
   try {
     browserClient = await CDP({ host, port, secure, target: false });
@@ -191,6 +213,20 @@ export async function scrapeProductViaCDP(url, {
 
     const targets = await CDP.List({ host, port, secure });
     target = pickShopeeTarget(targets, ids, url);
+
+    // 复用 + 清理:专用 CDP Chrome(C:\chrome-cdp-d3)上没必要每个商品开新 tab。
+    // 没有精确匹配时,复用一个已存在的 Shopee 商品 tab(下面会导航过去),
+    // 并关掉多余的商品 tab —— 把历史堆积的也一并清掉,避免越开越多。
+    // 默认开;设 HERMES_CDP_REUSE_TAB=0 可退回「每个商品开新 tab」的旧行为。
+    if (!target && reuseTab) {
+      const productTabs = (targets || []).filter((t) => t.type === 'page' && isShopeeProductUrl(t.url));
+      if (productTabs.length) {
+        target = productTabs[0]; // 复用第一个;不标记 createdTarget,跑完不关它
+        for (const extra of productTabs.slice(1)) {
+          try { await CDP.Close({ host, port, secure, id: extra.id }); } catch {}
+        }
+      }
+    }
 
     if (!target && allowCreatePage) {
       const created = await createBackgroundTarget(browserClient, url, host, port, secure);
@@ -251,10 +287,10 @@ export async function scrapeProductViaCDP(url, {
 
     // 被反爬拦(如 90309999)时：重载页面、等反爬 JS 跑完，再读一次。只有被拦的链接才慢，正常的不受影响。
     const ANTIBOT_RETRY = Number(process.env.HERMES_CDP_ANTIBOT_RETRY || 2);
-    let voucherAmount = 0;
+    let voucherInfo = { vouchers: [], fixed: 0, percent: 0 };
     let fetchResult = null;
     for (let attempt = 0; attempt <= ANTIBOT_RETRY; attempt += 1) {
-      voucherAmount = await extractVoucherAmountFromRuntime(Runtime);
+      voucherInfo = await extractVoucherInfoFromRuntime(Runtime);
       fetchResult = await evaluateJson(Runtime, buildPdpFetchExpression(ids));
       const antiBotCode = fetchResult?.payload?.error;
       if (antiBotCode && antiBotCode !== 0 && attempt < ANTIBOT_RETRY) {
@@ -282,16 +318,22 @@ export async function scrapeProductViaCDP(url, {
       throw new Error(`[${fetchResult.errorType || 'cdp_fetch'}] ${fetchResult.errorMessage || '页面内 fetch 失败'}`);
     }
 
+    // 固定额：接口(type 1)无门槛券比 DOM 可靠，合并进券列表；百分比/满减以 DOM 文字为准。
+    const _sv = extractShopVoucher(fetchResult?.payload);
+    const vouchers = mergeApiFixedVoucher(voucherInfo.vouchers, _sv);
+    const voucherAmount = bestUnconditionalFixed(vouchers); // 记录级展示用(无门槛固定额最大值)
+
     const result = extractFromPdp(fetchResult.payload);
     if (!result?.variants) {
       throw new Error('CDP 抓取到的不是商品价格数据，可能当前 Chrome 里的 Shopee 没登录或被软拦截。');
     }
 
-    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, scrapedAt: new Date().toISOString() };
+    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, vouchers, scrapedAt: new Date().toISOString() };
   } finally {
     try { if (client) await client.close(); } catch {}
     try {
-      if (createdTarget && target?.id) await CDP.Close({ host, port, secure, id: target.id });
+      // 复用模式:保留在用的 tab(下次复用,tab 不增长);非复用模式才关掉本次新建的 tab。
+      if (createdTarget && target?.id && !reuseTab) await CDP.Close({ host, port, secure, id: target.id });
     } catch {}
     try { if (browserClient) await browserClient.close(); } catch {}
   }
@@ -371,40 +413,88 @@ function normalizeVoucherAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
-async function extractVoucherAmountFromPage(page) {
+function normalizeVoucherInfo(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const vouchers = [];
+  for (const v of list) {
+    const fixed = Number(v?.fixed);
+    const percent = Number(v?.percent);
+    const minSpend = Number(v?.minSpend);
+    const f = Number.isFinite(fixed) && fixed > 0 ? fixed : 0;
+    // 百分比上限设 90%，挡住明显误读（如把价格数字当成百分比）。
+    const p = Number.isFinite(percent) && percent > 0 && percent <= 90 ? percent : 0;
+    const m = Number.isFinite(minSpend) && minSpend > 0 ? minSpend : 0;
+    if (f > 0 || p > 0) vouchers.push({ fixed: f, percent: p, minSpend: m });
+  }
+  // fixed/percent = 无门槛券里的最大值，仅供记录级展示/兜底（无法表达门槛）。
+  const free = vouchers.filter((v) => v.minSpend === 0);
+  return {
+    vouchers,
+    fixed: free.reduce((mx, v) => Math.max(mx, v.fixed), 0),
+    percent: free.reduce((mx, v) => Math.max(mx, v.percent), 0),
+  };
+}
+
+// 把接口读到的无门槛固定额店铺券(type 1)并入 DOM 券列表。
+function mergeApiFixedVoucher(vouchers, sv) {
+  const list = Array.isArray(vouchers) ? [...vouchers] : [];
+  if (sv && sv.voucherType === 'fixed' && Number(sv.voucherAmount) > 0) {
+    list.push({ fixed: Number(sv.voucherAmount), percent: 0, minSpend: 0 });
+  }
+  return list;
+}
+
+// 记录级展示用：无门槛固定额券的最大值。
+function bestUnconditionalFixed(vouchers) {
+  return (Array.isArray(vouchers) ? vouchers : [])
+    .filter((v) => !v.minSpend)
+    .reduce((mx, v) => Math.max(mx, Number(v.fixed) || 0), 0);
+}
+
+async function extractVoucherInfoFromPage(page) {
   try {
-    return normalizeVoucherAmount(await page.evaluate(buildVoucherAmountExpression()));
+    return normalizeVoucherInfo(await page.evaluate(buildVoucherInfoExpression()));
   } catch {
-    return 0;
+    return { fixed: 0, percent: 0 };
   }
 }
 
-async function extractVoucherAmountFromRuntime(Runtime) {
+async function extractVoucherInfoFromRuntime(Runtime) {
   try {
-    return normalizeVoucherAmount(await evaluateJson(Runtime, buildVoucherAmountExpression()));
+    return normalizeVoucherInfo(await evaluateJson(Runtime, buildVoucherInfoExpression()));
   } catch {
-    return 0;
+    return { fixed: 0, percent: 0 };
   }
 }
 
-function buildVoucherAmountExpression() {
+// 从 DOM 抠 voucher 文字：每张券带回 {fixed(RM), percent(%), minSpend(满额门槛RM)}。
+// 满减券(如「RM10 off, Min. spend RM500」)的门槛留到 runOnce 按款式价格判定是否生效。
+function buildVoucherInfoExpression() {
   return String.raw`
     (() => {
-      let best = 0;
+      const out = [];
       const allEls = [
         ...document.querySelectorAll('[class*="voucher"], [class*="Voucher"]'),
         ...Array.from(document.querySelectorAll('*')).filter((el) => {
           const text = String(el.textContent || '');
           return el.children.length === 0 &&
-            /RM\s*\d+\s*(off|OFF)/i.test(text) &&
-            text.length < 80;
+            /(RM\s*\d+(?:\.\d+)?\s*(?:off|OFF))|(\d+(?:\.\d+)?\s*%\s*(?:off|OFF))/i.test(text) &&
+            text.length < 120;
         })
       ];
       allEls.forEach((el) => {
-        const m = String(el.textContent || '').match(/RM\s*(\d+(?:\.\d+)?)\s*(?:off|OFF)/i);
-        if (m) best = Math.max(best, parseFloat(m[1]));
+        const text = String(el.textContent || '');
+        const f = text.match(/RM\s*(\d+(?:\.\d+)?)\s*(?:off|OFF)/i);
+        const p = text.match(/(\d+(?:\.\d+)?)\s*%\s*(?:off|OFF)/i);
+        if (!f && !p) return;
+        const ms = text.match(/min(?:imum)?\.?\s*spend\s*RM\s*(\d+(?:\.\d+)?)/i);
+        out.push({
+          fixed: f ? parseFloat(f[1]) : 0,
+          percent: p ? parseFloat(p[1]) : 0,
+          minSpend: ms ? parseFloat(ms[1]) : 0,
+        });
       });
-      return best;
+      return out;
     })()
   `;
 }
