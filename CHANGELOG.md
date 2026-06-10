@@ -6,7 +6,13 @@
 
 ## 2026-06-11
 
-### 防封改造：定时慢速 sweep + 不登录 + 验证人工接管
+### 实测：不登录自动化被挡 → Chrome 默认改回登录 profile
+- **文件**：`scripts/windows/start-chrome-cdp.ps1`
+- **发现**：手动无痕开 Shopee 商品页能看价；但**自动化(CDP)+不登录**会被挡「Page Unavailable / Log in to continue」——登出的自动化不被信任。**不登录这条对自动化是死路**（裸调接口回 `is_login:false`/`error:90309999`）。网上「能抓」的方法几乎全是 stealth/指纹伪造/代理池/验证码求解（破解，Leon 拒绝）。
+- **改了什么**：start-chrome-cdp 默认 profile 改回 `C:\chrome-cdp-d3`（登录用）。防封改靠「温柔调度」(慢/不突发/碰验证停)，不是靠不登录。
+- **结论/待定**：可行路只剩 ① 登录(用小号)+温柔抓+人工解验证(免费,小风险) ② 付费 Apify(他们扛反爬,零账号风险)。封号主因是**突发全量抓**(清D1后猛抓106条)，不是登录本身——温柔版去掉了突发。Leon 在想选哪个。
+
+### 防封改造：定时慢速 sweep + 验证人工接管
 - **文件**：`src/runOnce.mjs`(新增 `runSweep`)、`src/hermes.mjs`(改定时调度器)、`scripts/windows/start-hermes.ps1`、`scripts/windows/start-chrome-cdp.ps1`、`.env.example`、`src/recovery/VerificationDetector.mjs`
 - **背景**：用登录账号 + 突发全量抓导致 Shopee 检测自动化、**账号被封**。重做成「不赔账号」的模型。
 - **改了什么**：

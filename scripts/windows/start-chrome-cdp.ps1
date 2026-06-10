@@ -3,10 +3,11 @@ if (-not (Test-Path $chrome)) {
   throw "Chrome not found at $chrome"
 }
 
-# Chrome profile 目录。默认用「不登录」的全新 profile（C:\chrome-cdp-d3-nologin）：
-# 从不登录 Shopee → 没账号可封，最坏只是 IP 被临时限速。
-# 要回到旧的登录 profile，设 $env:CHROME_CDP_PROFILE = "C:\chrome-cdp-d3"
-$profileDir = if ($env:CHROME_CDP_PROFILE) { $env:CHROME_CDP_PROFILE } else { "C:\chrome-cdp-d3-nologin" }
+# Chrome profile 目录。默认用登录用的 profile（C:\chrome-cdp-d3）。
+# 注意(2026-06-11 实测)：「不登录」自动化抓 Shopee 会被挡(Page Unavailable / 要登录)——
+# 登出+自动化=不被信任。要抓数据必须登录(建议用不在乎的小号)。所以不登录这条死路，别用 nologin profile。
+# 防封靠「温柔调度」(慢/不突发/碰验证停)，不是靠不登录。
+$profileDir = if ($env:CHROME_CDP_PROFILE) { $env:CHROME_CDP_PROFILE } else { "C:\chrome-cdp-d3" }
 $args = @(
   "--remote-debugging-port=9222",
   "--user-data-dir=$profileDir",
