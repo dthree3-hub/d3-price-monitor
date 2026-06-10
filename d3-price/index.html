@@ -2213,6 +2213,8 @@ function flattenRecords(records) {
       promoPrice: variant.promoPrice,
       inStock: variant.inStock,
       stock: variant.stock,
+      voucherAmount: Number(variant.voucherAmount) || 0,
+      soldOut: variant.soldOut === true,
     }))
   );
 }
@@ -2393,7 +2395,7 @@ function render() {
         const label = typeof c === 'string' ? c : (c && c.label) || '';
         return label ? `<span style="display:inline-block;margin:3px 4px 0 0;padding:2px 7px;border-radius:6px;background:rgba(250,204,21,.22);color:#7a5c10;font-size:11px;font-weight:700">🎟 ${escapeHtml(label)}</span>` : '';
       }).join('');
-      const price = formatRmDisplay(afterVoucher(row.currentPrice));
+      const price = formatRmDisplay(afterVoucher(row.currentPrice, row.voucherAmount > 0 ? row.voucherAmount : DEFAULT_VOUCHER_DISCOUNT));
       const original = formatRmDisplay(row.originalPrice);
       const stockClass = row.inStock ? 'pill' : 'pill out';
       const stockLabel = row.inStock ? `In stock${row.stock != null ? ` (${row.stock})` : ''}` : 'Out of stock';
@@ -2842,7 +2844,7 @@ function escapeAttribute(value) {
 
     const legend = `<button data-role="all" class="${selectedRole == null ? 'active' : ''}">Us — show all</button>` +
       activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('') +
-      `<button data-cheaper="1" class="${onlyCheaper ? 'active' : ''}" style="border-color:#9e3d2c;color:${onlyCheaper ? '#fff' : '#9e3d2c'}${onlyCheaper ? ';background:#9e3d2c' : ''}">⚠ 只看低过我们 <span class="cnt">${gaps.length}</span></button>`;
+      `<button data-cheaper="1" class="${onlyCheaper ? 'active' : ''}" style="border-color:#9e3d2c;color:${onlyCheaper ? '#fff' : '#9e3d2c'}${onlyCheaper ? ';background:#9e3d2c' : ''}">⚠ Only cheaper than us <span class="cnt">${gaps.length}</span></button>`;
 
     let filterHtml = '';
     if (selectedRole) {
@@ -2977,7 +2979,7 @@ function escapeAttribute(value) {
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Yellow highlight = that competitor price is lower than ours.</strong></p>' +
-      '<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 立即更新 (Refresh now)</button> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>' +
+      '<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>' +
       `<div class="boss-legend">${legend}</div>` +
       voucherHtml +
       filterHtml +
@@ -3003,13 +3005,13 @@ function escapeAttribute(value) {
     if (refreshBtn) refreshBtn.onclick = async () => {
       const msgEl = sec.querySelector('#bossRefreshMsg');
       refreshBtn.disabled = true;
-      if (msgEl) msgEl.textContent = '已发送请求…';
+      if (msgEl) msgEl.textContent = 'Sending request…';
       try {
         const r = await fetch('https://d3-price-worker.dthree.workers.dev/api/trigger', { method: 'POST' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        if (msgEl) msgEl.textContent = '✅ 已通知 Hermes，抓完后网页会自动刷新（每 3 分钟）。最多等一圈时间。';
+        if (msgEl) msgEl.textContent = '✅ Hermes notified. The page auto-refreshes every 3 min once scraping finishes (may take up to one full cycle).';
       } catch (e) {
-        if (msgEl) msgEl.textContent = '❌ 请求失败：' + e.message;
+        if (msgEl) msgEl.textContent = '❌ Request failed: ' + e.message;
       } finally {
         setTimeout(() => { refreshBtn.disabled = false; }, 5000);
       }
