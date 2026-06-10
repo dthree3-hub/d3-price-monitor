@@ -9,11 +9,18 @@ if (-not $env:CHROME_CDP_URL) {
 if (-not $env:HERMES_INTERVAL_MINUTES) {
   $env:HERMES_INTERVAL_MINUTES = "3"
 }
+if (-not $env:HERMES_CYCLE_GAP_MINUTES) {
+  $env:HERMES_CYCLE_GAP_MINUTES = "45"
+}
+# 反爬/验证页人工兜底:被拦时最多等你过验证多久(分钟),超时就跳过继续
+if (-not $env:HERMES_RECOVERY_MAX_WAIT_MIN) {
+  $env:HERMES_RECOVERY_MAX_WAIT_MIN = "5"
+}
 if (-not $env:HERMES_BATCH_SIZE) {
   $env:HERMES_BATCH_SIZE = "5"
 }
 if (-not $env:HERMES_ITEM_DELAY_MS) {
-  $env:HERMES_ITEM_DELAY_MS = "10000"
+  $env:HERMES_ITEM_DELAY_MS = "12000"
 }
 if (-not $env:HERMES_CDP_REQUIRE_OPEN_PAGE) {
   $env:HERMES_CDP_REQUIRE_OPEN_PAGE = "0"

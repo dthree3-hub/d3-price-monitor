@@ -73,8 +73,10 @@ async function main() {
       const totalBatches = result.batchSize > 0
         ? Math.ceil((result.totalProducts || 0) / result.batchSize)
         : 0;
+      // 最后一批跑完后 nextBatchCursor 归 0(下一圈从头开始),此时本圈剩余 = 0;
+      // 否则 总数−0 会被误判成「整圈没跑完」,导致 90 分休息永远不触发。
       const remainingProducts = Number.isFinite(Number(result.totalProducts)) && Number.isFinite(Number(result.nextBatchCursor))
-        ? Math.max(0, Number(result.totalProducts) - Number(result.nextBatchCursor))
+        ? (Number(result.nextBatchCursor) === 0 ? 0 : Math.max(0, Number(result.totalProducts) - Number(result.nextBatchCursor)))
         : null;
       const remainingBatches = remainingProducts != null && result.batchSize > 0
         ? Math.ceil(remainingProducts / result.batchSize)

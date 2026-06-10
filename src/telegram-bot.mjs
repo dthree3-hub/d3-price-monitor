@@ -14,6 +14,7 @@ import {
   writeTelegramOffset,
 } from './lib-hermes.mjs';
 import { runOnce } from './runOnce.mjs';
+import { writeManualSignal } from './recovery/TelegramNotifier.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,6 +90,15 @@ async function executeAction(chatId, action, rawText, directReply = '') {
 
   if (action === 'help') {
     return sendTelegramReply(chatId, buildHelpMessage());
+  }
+
+  if (action === 'resume') {
+    writeManualSignal('resume');
+    return sendTelegramReply(chatId, '好,继续抓被拦的那一条。');
+  }
+  if (action === 'abort') {
+    writeManualSignal('abort');
+    return sendTelegramReply(chatId, '好,跳过被拦的那一条,继续往下。');
   }
 
   if (action === 'add') {
@@ -212,6 +222,13 @@ function classifyByRules(text) {
   const normalized = normalizeText(text);
   if (!normalized || normalized === '/start' || normalized === '/help' || normalized === 'help') {
     return { action: 'help' };
+  }
+
+  if (normalized === '/resume' || normalized === 'resume' || normalized === '继续') {
+    return { action: 'resume' };
+  }
+  if (normalized === '/abort' || normalized === 'abort' || normalized === '跳过') {
+    return { action: 'abort' };
   }
 
   if (normalized.startsWith('/add') || (normalized.includes('add') && normalized.includes('http'))) {
