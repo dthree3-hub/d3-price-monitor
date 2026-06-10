@@ -64,6 +64,7 @@ function extractTier(text) {
     const gift = raw.match(/promo\s*\(gift set\)/i);
     return gift ? gift[0] : 'Promo'; // Promo / Promo1 / Promo 2 … → 统一归 Promo;Gift Set 保留单独
   }
+  if (/offer/i.test(raw)) return 'Promo'; // Offer / Limited Offer = Promo（TAC 用这写法）
   if (/basic/i.test(raw)) return 'Basic'; // Basic / Basic1 … → 统一归 Basic
   if (/gift\s*set|gift/i.test(raw)) return raw.match(/gift(?:\s*set|\s*\d+)?/i)?.[0] || 'Gift';
   if (/set\s*[a-z0-9]+/i.test(raw)) return raw.match(/set\s*[a-z0-9]+/i)?.[0] || raw;
@@ -82,12 +83,12 @@ function extractModel(text) {
   if (compact) return `S${compact[1]}${compact[2] ? (compact[2] === '+' ? '+' : compact[2].toLowerCase() === 'plus' ? '+' : ' Ultra') : ''}`;
   // 平板 S 系列（S10/S11）：variant 名常无 "Tab" 前缀，"U" 缩写 = Ultra（如 S11U = S11 Ultra）；
   // 同时支持 FE/FE+/Lite/+ 后缀。families 与 Excel A 列一致（不带 Tab 前缀）。
-  compact = source.match(/^(?:Tab\s*)?S(1\d)\s*(Ultra|U(?![A-Za-z])|FE\s*\+|FE|Lite|\+|Plus)?/i);
+  compact = source.match(/^(?:Tab\s*)?S(1\d)\s*(Ultra|U(?![A-Za-z])|FE\s*\+|FE\s*Plus|FE|Lite|\+|Plus)?/i);
   if (compact) {
     const raw = (compact[2] || '').toLowerCase().replace(/\s+/g, '');
     let suffix = '';
     if (raw === 'ultra' || raw === 'u') suffix = ' Ultra';
-    else if (raw === 'fe+') suffix = ' FE+';
+    else if (raw === 'fe+' || raw === 'feplus') suffix = ' FE+'; // FE+ / FE PLUS / FE +
     else if (raw === 'fe') suffix = ' FE';
     else if (raw === 'lite') suffix = ' Lite';
     else if (raw === '+' || raw === 'plus') suffix = '+';
@@ -149,12 +150,14 @@ export function parseVariantDescriptor(rawName, context = {}) {
 
   // 平板（A11 / S10 / S11 / Tab）：网络是 WiFi 或 LTE，且可能写在款式名任意位置；
   // 若型号还没带网络，就从款式名补上，让 WiFi 款和 LTE 款分成不同型号（对手价才对得上）。
+  // 款式名没写网络时默认 WiFi（平板基础款=WiFi，LTE/5G 款都会明确标网络）——
+  // 避免「Tab S10 Lite」与「Tab S10 Lite WiFi」拆成两行。
   if (/^(A11|S1\d|Tab)\b/i.test(model) && !/(wifi|lte|\b4g\b|\b5g\b)/i.test(model)) {
     const tabNet = /\bwifi\b/i.test(name) ? 'WiFi'
       : (/\blte\b/i.test(name) ? 'LTE'
       : (/\b5g\b/i.test(name) ? '5G'
-      : (/\b4g\b/i.test(name) ? '4G' : '')));
-    if (tabNet) model = `${model} ${tabNet}`;
+      : (/\b4g\b/i.test(name) ? '4G' : 'WiFi')));
+    model = `${model} ${tabNet}`;
   }
   // 统一平板带 "Tab" 前缀（A11 / S10 / S11 系列），避免 "S11 Ultra" 与 "Tab S11 Ultra" 拆成两行。
   if (/^(A11|S1\d)\b/i.test(model) && !/^Tab\b/i.test(model)) model = `Tab ${model}`;

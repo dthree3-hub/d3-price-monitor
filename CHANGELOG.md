@@ -6,6 +6,16 @@
 
 ## 2026-06-10
 
+### 型号/档位解析修复（Leon 数据复核 #4/#5 + S10 FE+/Lite）
+- **文件**：`src/variant-parser.mjs`、`d3-price/index.html`
+- **改了什么**：
+  - **#4 Offer→Promo**：`extractTier` / 前端 `normalizeTier` / `canonTier` 新增 `offer→Promo`（TAC 的 A37 等用 "Offer"/"Limited Offer" 表示 Promo）。
+  - **#5 A56 类 5G 去重**：前端 `normalizeModelKey` 对 5G 独有的 A 系列(A26/A36/A37/A56) 去掉冗余 "5G"，让「A56 256GB」与「A56 256GB 5G」合并（A06/A07/A16/A17 有 4G/5G 双版，保留网络）。
+  - **S10 FE+ 识别**：`extractModel` S1x 正则加 `FE\s*Plus`，"S10 FE PLUS"/"S10 FE +"/"S10FE+" 都归到 `S10 FE+`，与 `S10 FE` 分开（原本 "FE PLUS" 丢 PLUS 被并进 FE）。
+  - **平板 WiFi 默认**：平板款式名没写网络时默认 WiFi（基础款=WiFi，LTE/5G 都会明确标），「Tab S10 Lite」与「Tab S10 Lite WiFi」合并，LTE 款仍分开。
+- **为什么**：Leon 逐条记录的数据问题。
+- **善后**：含后端解析 → 需同步 C:\D3 + 重抓；#5 纯前端 → Vercel 重部署。
+
 ### 删除「Price drop report」区域
 - **文件**：`d3-price/index.html`
 - **改了什么**：移除整个 `Price drop report` section（含 Last updated / Largest drop 指标和降价列表），删掉 `buildDropReport`/`renderDropList`/`toMalaysiaTime` 及相关元素声明。无用的 `.report-*` CSS 保留（不匹配任何元素，无害）。
