@@ -1,12 +1,12 @@
 import { loadEnvFile, logHermes } from './lib-hermes.mjs';
-import { runOnce } from './runOnce.mjs';
+import { runSweep } from './runOnce.mjs';
 import { syncLatestCloudRecords } from './sync-cloud-retry.mjs';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 触发端点：网页按钮 POST 后，这里 GET?consume=1 会返回 pending:true（并清除标记）。
+// 触发端点：网页按钮 POST 后，这里 GET?consume=1 返回 pending:true（并清标记）。
 function triggerUrl() {
   const base = process.env.D3_CLOUD_RECORDS_URL || 'https://d3-price-worker.dthree.workers.dev/api/sync';
   return base.replace(/\/api\/sync$/, '/api/trigger');
@@ -21,100 +21,108 @@ async function manualTriggerRequested() {
     return false;
   }
 }
-// 休息 totalMinutes 分钟，但每 pollSec 秒查一次「立即抓」按钮；按了就提前返回。
-async function waitOrManualTrigger(totalMinutes, pollSec = 30) {
-  const deadline = Date.now() + totalMinutes * 60 * 1000;
-  while (Date.now() < deadline) {
-    await sleep(Math.min(pollSec * 1000, Math.max(0, deadline - Date.now())));
-    if (await manualTriggerRequested()) return true;
-  }
-  return false;
+
+function parseHM(s) {
+  const m = String(s).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const min = Number(m[1]) * 60 + Number(m[2]);
+  return min >= 0 && min < 24 * 60 ? min : null;
+}
+function fmtHM(min) {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+function minutesNow() {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
 }
 
 async function main() {
   loadEnvFile();
-  const minutes = Number(process.env.HERMES_INTERVAL_MINUTES || 60);
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    throw new Error('HERMES_INTERVAL_MINUTES 必须是正数');
-  }
-  // 一整圈跑完后的休息时长（分钟）。>0 时：批次间隔仍是 minutes，但跑完整圈后停这么久再开下一圈。
-  const cycleGapMinutes = Number(process.env.HERMES_CYCLE_GAP_MINUTES || 0);
-  const cloudSyncEnabled = process.env.HERMES_SYNC_CLOUD !== '0';
-  if (cloudSyncEnabled) {
-    process.env.HERMES_SYNC_CLOUD = '0';
-    logHermes('Hermes 云端同步改由 retry uploader 处理。');
-  }
+  // 云端同步统一走 retry uploader（和旧版一致，更稳）；关掉 sweep 内部的直发，避免双发。
+  process.env.HERMES_SYNC_CLOUD = '0';
 
-  logHermes(`Hermes 启动，每 ${minutes} 分钟运行一次`);
-  console.log(`Hermes 已启动，每 ${minutes} 分钟运行一次`);
+  const times = (process.env.HERMES_RUN_TIMES || '09:30,13:00,16:30')
+    .split(',').map(parseHM).filter((x) => x != null).sort((a, b) => a - b);
+  if (!times.length) throw new Error('HERMES_RUN_TIMES 解析不出有效时间（格式如 09:30,13:00,16:30）');
 
-  while (true) {
+  const startupSweep = process.env.HERMES_STARTUP_SWEEP !== '0';
+  const minGapMin = Number(process.env.HERMES_MIN_SWEEP_GAP_MINUTES || 30);      // 两次抓取最小间隔，防意外连抓
+  const manualMinGapMin = Number(process.env.HERMES_MANUAL_MIN_GAP_MINUTES || 5); // 手动触发最小间隔
+  const pollSec = Number(process.env.HERMES_TRIGGER_POLL_SEC || 60);             // 听按钮的轮询间隔（只问自家 Worker，不碰 Shopee）
+
+  let lastSweepAt = 0;
+  const ranSlots = new Set(); // key: "YYYY-M-D HH:MM"，跑过的定时点（防当天重复）
+
+  async function doSweep(group, reason) {
     const startedAt = new Date().toISOString();
-    let cycleComplete = false;
     try {
-      const result = await runOnce();
-      const changed = result.changes.filter((change) => change.status !== 'same').length;
+      const r = await runSweep({ group, reason });
+      lastSweepAt = Date.now();
       let cloudLabel = '';
-      if (cloudSyncEnabled) {
-        try {
-          const cloud = await syncLatestCloudRecords({ force: true });
-          if (cloud.synced) {
-            cloudLabel = `，云端同步成功 ${cloud.records} 条`;
-            logHermes(`云端 retry 同步成功: ${cloud.url}（${cloud.records} 条，${cloud.bytes} bytes，第 ${cloud.attempt} 次）`);
-          } else {
-            cloudLabel = `，云端同步跳过: ${cloud.reason || 'unknown'}`;
-            logHermes(`云端 retry 同步跳过: ${cloud.reason || 'unknown'}`);
-          }
-        } catch (error) {
-          cloudLabel = '，云端同步失败';
-          logHermes(`云端 retry 同步失败: ${error.message || String(error)}`);
-        }
+      try {
+        const cloud = await syncLatestCloudRecords({ force: true });
+        cloudLabel = cloud.synced ? `，云端同步成功 ${cloud.records} 条` : `，云端同步跳过:${cloud.reason || ''}`;
+      } catch {
+        cloudLabel = '，云端同步失败';
       }
-      const totalBatches = result.batchSize > 0
-        ? Math.ceil((result.totalProducts || 0) / result.batchSize)
-        : 0;
-      // 最后一批跑完后 nextBatchCursor 归 0(下一圈从头开始),此时本圈剩余 = 0;
-      // 否则 总数−0 会被误判成「整圈没跑完」,导致 90 分休息永远不触发。
-      const remainingProducts = Number.isFinite(Number(result.totalProducts)) && Number.isFinite(Number(result.nextBatchCursor))
-        ? (Number(result.nextBatchCursor) === 0 ? 0 : Math.max(0, Number(result.totalProducts) - Number(result.nextBatchCursor)))
-        : null;
-      const remainingBatches = remainingProducts != null && result.batchSize > 0
-        ? Math.ceil(remainingProducts / result.batchSize)
-        : null;
-      const batchLabel = result.batchNumber
-        ? `第 ${result.batchNumber} 批${totalBatches ? ` / 共 ${totalBatches} 批` : ''}`
-        : '当前批次未知';
-      const cursorLabel = Number.isFinite(Number(result.batchCursor))
-        ? `cursor ${result.batchCursor} -> ${result.nextBatchCursor}`
-        : 'cursor 未知';
-      cycleComplete = remainingProducts === 0;
-      const remainingLabel = remainingProducts == null
-        ? ''
-        : (remainingProducts === 0
-          ? '，本圈已跑完，下轮从第 1 批开始'
-          : `，还剩 ${remainingProducts} 条 / ${remainingBatches} 批`);
-      const summary = `本轮完成: ${batchLabel}，${cursorLabel}${remainingLabel}，成功 ${result.scraped}/${result.products}，变化 ${changed}，失败 ${result.failures.length}${cloudLabel}`;
+      const summary = `本轮完成(${reason}): 组=${group}，抓 ${r.scraped}/${r.products}，失败 ${r.failures.length}${r.aborted ? '(风控提前停止)' : ''}${cloudLabel}`;
       console.log(`[${startedAt}] ${summary}`);
       logHermes(summary);
     } catch (error) {
-      const message = `[${startedAt}] Hermes 本轮失败: ${error.message || String(error)}`;
-      console.error(message);
-      logHermes(message);
+      const msg = `[${startedAt}] 本轮失败(${reason}): ${error.message || String(error)}`;
+      console.error(msg);
+      logHermes(msg);
+    }
+  }
+
+  const schedLabel = times.map(fmtHM).join(' / ');
+  logHermes(`Hermes 定时模式启动。每日 ${schedLabel}（首轮含自家店，其余只抓对手）。手动按钮随时可触发。`);
+  console.log(`Hermes 已启动（定时 ${schedLabel}，首轮含自家店）`);
+
+  // 启动先抓一轮对手；若临近某个定时点（minGap 内）则跳过，交给定时轮，避免短时间连抓两轮。
+  if (startupSweep) {
+    const cur = minutesNow();
+    const nearScheduled = times.some((t) => t >= cur && t - cur <= minGapMin);
+    if (nearScheduled) {
+      logHermes(`启动跳过自动抓：临近定时点（${minGapMin} 分钟内），交给定时轮。`);
+    } else {
+      await doSweep('competitor', 'startup');
+    }
+  }
+
+  while (true) {
+    // 手动按钮（带最小间隔保护，防连按猛抓）
+    if (await manualTriggerRequested()) {
+      if (Date.now() - lastSweepAt >= manualMinGapMin * 60 * 1000) {
+        await doSweep('competitor', 'manual');
+      } else {
+        logHermes(`收到手动触发，但距上次抓取不足 ${manualMinGapMin} 分钟，跳过（防连抓）。`);
+      }
     }
 
-    if (cycleComplete && cycleGapMinutes > 0) {
-      const msg = `本圈跑完，休息 ${cycleGapMinutes} 分钟后再开下一圈（期间可在网页按「立即更新」提前触发）。`;
-      console.log(msg);
-      logHermes(msg);
-      const triggered = await waitOrManualTrigger(cycleGapMinutes);
-      if (triggered) {
-        const t = '收到网页「立即更新」请求，提前开始抓取。';
-        console.log(t);
-        logHermes(t);
+    // 定时轮
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    const cur = now.getHours() * 60 + now.getMinutes();
+    for (let i = 0; i < times.length; i += 1) {
+      const slot = times[i];
+      const key = `${todayKey} ${fmtHM(slot)}`;
+      if (cur >= slot && cur < slot + 5 && !ranSlots.has(key)) {
+        ranSlots.add(key);
+        if (Date.now() - lastSweepAt < minGapMin * 60 * 1000) {
+          logHermes(`定时点 ${fmtHM(slot)} 距上次抓取不足 ${minGapMin} 分钟，跳过本轮（防连抓）。`);
+          continue;
+        }
+        const group = i === 0 ? 'all' : 'competitor'; // 首个（最早）时段含自家店
+        await doSweep(group, `scheduled ${fmtHM(slot)}`);
       }
-    } else {
-      await sleep(minutes * 60 * 1000);
     }
+    // 清掉非今天的已跑标记，避免 set 无限增长
+    for (const k of ranSlots) {
+      if (!k.startsWith(`${todayKey} `)) ranSlots.delete(k);
+    }
+
+    await sleep(pollSec * 1000);
   }
 }
 

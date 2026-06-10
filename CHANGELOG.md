@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-06-11
+
+### 防封改造：定时慢速 sweep + 不登录 + 验证人工接管
+- **文件**：`src/runOnce.mjs`(新增 `runSweep`)、`src/hermes.mjs`(改定时调度器)、`scripts/windows/start-hermes.ps1`、`scripts/windows/start-chrome-cdp.ps1`、`.env.example`、`src/recovery/VerificationDetector.mjs`
+- **背景**：用登录账号 + 突发全量抓导致 Shopee 检测自动化、**账号被封**。重做成「不赔账号」的模型。
+- **改了什么**：
+  - `runSweep({group})`：一次抓完一组(self/competitor/all)，**跨店轮流 + 各店打乱 + 每条随机 10–20 秒**，不再用 batch cursor。碰风控/封锁连续 N 次自动停。
+  - `hermes.mjs` 从「连续 90 分钟 cycle」改成**定时调度**：每天 `HERMES_RUN_TIMES`(默认 09:30/13:00/16:30) 各跑一整圈；首个时段含自家店、其余只对手；**启动自动先抓一轮**(临近定时点则跳过)；每分钟轮询 `/api/trigger` 支持网页「🔄 Refresh now」手动触发；最小间隔保护防连抓。
+  - **验证人工接管**：`HERMES_RECOVERY=1` + `MAX_WAIT_MIN=3` → 碰验证页暂停 + Telegram 通知，等你最多 3 分钟手动解；**没解则整轮停止**(`runSweep` 接住 `VerificationTimeoutError/AbortedError` 直接 break)。
+  - **不登录**：`start-chrome-cdp.ps1` 的 profile 改成可配 `CHROME_CDP_PROFILE` → 用全新没登录 Shopee 的 profile，没账号可封；`HERMES_CDP_REUSE_TAB=1` 复用同一 tab(少开新 tab)。
+  - `VerificationDetector` 认得 Shopee "Page Unavailable / account restricted / automated tools detected" 封锁页(归 ACCESS_DENIED)。
+- **善后**：同步 4 个 src 文件到 C:\D3、`HERMES_RECOVERY=1`、**先验证「不登录」能否拿到价格**再切换 profile。
+
 ## 2026-06-10
 
 ### 型号/档位解析修复（Leon 数据复核 #4/#5 + S10 FE+/Lite）

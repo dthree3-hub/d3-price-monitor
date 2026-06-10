@@ -324,6 +324,146 @@ export async function runOnce() {
   };
 }
 
+// ── 整组慢速 sweep（防封新模型）──────────────────────────────────────────────
+// 一次把某一组(self / competitor / all)的所有商品抓完，跨店轮流 + 随机延迟，
+// 不用 batch cursor。比 runOnce 的「每轮一批」更适合「一天定时跑几整圈」的节奏。
+function shopIdOf(url) {
+  const m = String(url || '').match(/i\.(\d+)\.\d+/);
+  return m ? m[1] : '';
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// 按店分组、各店内部打乱、再跨店轮流取（避免连续猛打同一家店）。
+function interleaveByShop(products) {
+  const byShop = new Map();
+  for (const p of products) {
+    const sid = shopIdOf(p.product_url) || 'unknown';
+    if (!byShop.has(sid)) byShop.set(sid, []);
+    byShop.get(sid).push(p);
+  }
+  const lists = [...byShop.values()].map((arr) => shuffleInPlace(arr));
+  const out = [];
+  const maxLen = Math.max(0, ...lists.map((a) => a.length));
+  for (let i = 0; i < maxLen; i += 1) {
+    for (const arr of lists) {
+      if (i < arr.length) out.push(arr[i]);
+    }
+  }
+  return out;
+}
+
+// group: 'competitor'（默认，排除自家店）| 'self'（只自家店）| 'all'（全部）
+export async function runSweep({ group = 'competitor', reason = '' } = {}) {
+  loadEnvFile();
+  const startedAt = new Date().toISOString();
+  const mode = process.env.HERMES_SCRAPE_MODE || 'cdp';
+  const minMs = Number(process.env.HERMES_ITEM_DELAY_MIN_MS || 10000);
+  const maxMs = Number(process.env.HERMES_ITEM_DELAY_MAX_MS || 20000);
+  const abortSoftBlocks = Number(process.env.HERMES_ABORT_AFTER_SOFTBLOCKS || 2);
+  const selfShop = String(process.env.HERMES_SELF_SHOP_ID || '54618012');
+
+  const all = loadProducts();
+  if (!all.length) {
+    usage();
+    throw new Error(`没有可抓取的商品。先编辑 ${productsFile}`);
+  }
+
+  let selected = all;
+  if (group === 'self') selected = all.filter((p) => shopIdOf(p.product_url) === selfShop);
+  else if (group === 'competitor') selected = all.filter((p) => shopIdOf(p.product_url) !== selfShop);
+  selected = interleaveByShop(selected);
+
+  logHermes(`[sweep] 开始 组=${group}${reason ? `(${reason})` : ''}，共 ${selected.length} 条，模式=${mode}，每条随机间隔 ${minMs}-${maxMs}ms`);
+
+  const incoming = [];
+  const failures = [];
+  let consecutiveSoftBlocks = 0;
+  let aborted = false;
+
+  for (const product of selected) {
+    try {
+      const record = await scrapeOneWithRetry(product, mode);
+      incoming.push(record);
+      consecutiveSoftBlocks = 0;
+    } catch (error) {
+      const message = `${product.competitor || '-'} | ${product.product_url} | ${error.message || String(error)}`;
+      failures.push(message);
+      logHermes(`抓取失败: ${message}`);
+      // 碰到验证、你在限定时间内没解（或主动中止）→ 立即停整轮，不继续抓（你要的）。
+      if (error?.name === 'VerificationTimeoutError' || error?.name === 'VerificationAbortedError') {
+        aborted = true;
+        logHermes(`碰到验证你没在限时内解（${error.name}），停止本轮。下一轮或手动按钮再抓。`);
+        break;
+      }
+      if (isSoftBlockError(error)) {
+        consecutiveSoftBlocks += 1;
+        logHermes(`连续风控/页面异常计数: ${consecutiveSoftBlocks}/${abortSoftBlocks}`);
+        if (consecutiveSoftBlocks >= abortSoftBlocks) {
+          aborted = true;
+          logHermes('本轮提前结束：连续 Shopee 风控/封锁，停止本轮，等待下一轮/手动触发。');
+          break;
+        }
+      } else {
+        consecutiveSoftBlocks = 0;
+      }
+    }
+    // 随机延迟（防封关键：节奏不规律 + 慢）
+    const delay = minMs + Math.floor(Math.random() * Math.max(0, maxMs - minMs));
+    if (delay > 0) await sleep(delay);
+  }
+
+  const latestTimestamp = incoming[0]?.grabbedAt || null;
+  const { before, merged } = mergeNewRecords(incoming, all);
+  const changes = latestTimestamp ? computeBatchChanges(before, merged, latestTimestamp) : [];
+  const markdown = buildHermesMarkdown(changes, latestTimestamp, incoming.length);
+  const dashboardPath = buildSnapshot();
+
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, markdown);
+  if (failures.length) {
+    const body = ['# 抓取失败', '', ...failures.map((line) => `- ${line}`), ''].join('\n');
+    fs.appendFileSync(reportPath, `\n${body}`);
+  }
+
+  if (process.env.HERMES_NOTIFY !== '0') {
+    await sendTelegramMessage(buildTelegramMessage(changes));
+  }
+
+  try {
+    const cloud = await syncCloudRecords(merged);
+    if (cloud.synced) logHermes(`云端数据已同步: ${cloud.url}（${cloud.records} 条最新记录）`);
+  } catch (error) {
+    logHermes(`云端同步失败: ${error.message || String(error)}`);
+  }
+
+  writeHermesStatus({
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    mode,
+    group,
+    products: selected.length,
+    totalProducts: all.length,
+    scraped: incoming.length,
+    latestTimestamp,
+    changed: changes.filter((c) => c.status !== 'same').length,
+    failuresCount: failures.length,
+    failures,
+    aborted,
+    reportPath,
+    dashboardPath,
+  });
+
+  logHermes(`[sweep] 完成 组=${group}，抓 ${incoming.length}/${selected.length} 条，失败 ${failures.length}${aborted ? '（因风控提前停止）' : ''}`);
+  return { group, products: selected.length, scraped: incoming.length, failures, changes, aborted, latestTimestamp };
+}
+
 function canonicalizeEntryPath(filePath) {
   const resolved = path.resolve(filePath);
   try {

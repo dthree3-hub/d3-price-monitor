@@ -38,8 +38,9 @@ export function buildDetectionExpression() {
         loginText: (/log\s*in|sign in|请登录|登入|立即登录/i.test(t) && (has('input[type="password"]') || /\/login/i.test(url))),
         passwordField: has('input[type="password"]'),
 
-        // 访问被拒 / 被封
-        denied: /access denied|403 forbidden|forbidden|you don'?t have permission|have been blocked|ip address.*blocked|too many requests|429/i.test(t) || /403|access denied/i.test(title),
+        // 访问被拒 / 被封 / 账号因自动化被限制（Shopee "Page Unavailable" 封锁页）
+        denied: /access denied|403 forbidden|forbidden|you don'?t have permission|have been blocked|ip address.*blocked|too many requests|429|account has been (temporarily )?restricted|automated tools? detected|permanent ban|page unavailable/i.test(t)
+          || /403|access denied|page unavailable/i.test(title),
 
         // 会话过期
         sessionExpired: /session (has )?expired|please log ?in again|登录已过期|登入已过期|重新登录|your session (has )?timed out|session timeout/i.test(t),
@@ -112,7 +113,7 @@ export function classifyError(error) {
   if (/登录页|登入页|need.*log ?in|login page/i.test(text)) return VERIFICATION_TYPES.LOGIN_REQUIRED;
   if (/captcha|验证码|滑块|人机/i.test(text)) return VERIFICATION_TYPES.CAPTCHA;
   if (/cloudflare|just a moment/i.test(text)) return VERIFICATION_TYPES.CLOUDFLARE;
-  if (/access denied|forbidden|被封|blocked|403/i.test(text)) return VERIFICATION_TYPES.ACCESS_DENIED;
+  if (/access denied|forbidden|被封|blocked|403|account.*restricted|automated tools? detected|permanent ban|page unavailable/i.test(text)) return VERIFICATION_TYPES.ACCESS_DENIED;
   if (/session.*expired|登录已过期|重新登录|掉登录态/i.test(text)) return VERIFICATION_TYPES.SESSION_EXPIRED;
   return VERIFICATION_TYPES.NONE;
 }
