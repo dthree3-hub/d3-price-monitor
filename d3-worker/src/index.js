@@ -93,13 +93,24 @@ export default {
       const records = Array.isArray(body?.records) ? body.records : [];
       if (!records.length) return json({ ok: true, upserted: 0 });
 
-      const stmts = [];
+      // ── P2C 永久修复：每 item「先清后插」替换语义，杜绝 6-key 孤儿 ──
+      // variant_prices 是当前快照表：一条 listing 的行 = 它最近一次成功抓取。
+      // 对每个「带 ≥1 有效变体」的 item：DELETE 该 item 全部旧行 + INSERT 新行，放进同一个
+      // env.DB.batch()（D1 batch 是事务）→ 原子替换，旧 model/孤儿行被清掉。
+      // payload 里没有效变体的 item（如失败/空抓取）→ 不 DELETE，旧数据原样保留。
+      // price_history 是独立的追加表，单独批量写，不参与替换、永不删。
+      const historyStmts = [];
+      let itemsReplaced = 0;
+      let rowsInserted = 0;
+
       for (const rec of records) {
         if (!Array.isArray(rec.variants)) continue;
+
+        const itemRows = [];
         for (const v of rec.variants) {
           if (!v.model) continue;
           const sku = v.model + (v.capacity ? ` ${v.capacity}` : '');
-          stmts.push(
+          itemRows.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
                 (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, color, variant_name, grabbed_at, updated_at)
@@ -120,9 +131,9 @@ export default {
               rec.grabbedAt || new Date().toISOString()
             )
           );
-          // Insert history only when price actually changes
+          // Insert history only when price actually changes（append-only，永不删）
           if (v.currentPrice != null) {
-            stmts.push(
+            historyStmts.push(
               env.DB.prepare(`
                 INSERT INTO price_history (shop_id, item_id, sku, model, tier, price, grabbed_at)
                 SELECT ?,?,?,?,?,?,?
@@ -139,14 +150,27 @@ export default {
             );
           }
         }
+
+        // Guard：没有有效变体 → 绝不 DELETE（避免失败/空抓取清空已有数据）
+        if (!itemRows.length) continue;
+
+        // 原子替换：DELETE 本 item 全部旧行 + INSERT 新行，同一个 batch（事务）。
+        // 单 item 变体数实测 ≤64，+1 条 DELETE 远低于 D1 的 100 条/批上限。
+        await env.DB.batch([
+          env.DB.prepare(`DELETE FROM variant_prices WHERE shop_id = ? AND item_id = ?`)
+            .bind(rec.shopId, rec.itemId),
+          ...itemRows,
+        ]);
+        itemsReplaced += 1;
+        rowsInserted += itemRows.length;
       }
 
-      // D1 batch limit = 100 statements
-      for (let i = 0; i < stmts.length; i += 100) {
-        await env.DB.batch(stmts.slice(i, i + 100));
+      // price_history 追加，与替换解耦，单独批量（D1 100 条/批）
+      for (let i = 0; i < historyStmts.length; i += 100) {
+        await env.DB.batch(historyStmts.slice(i, i + 100));
       }
 
-      return json({ ok: true, records: records.length, stmts: stmts.length });
+      return json({ ok: true, records: records.length, itemsReplaced, rowsInserted, historyRows: historyStmts.length });
     }
 
     // ── GET /api/history?model=S25+Ultra+256GB ────────────────────────────────
