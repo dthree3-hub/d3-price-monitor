@@ -400,6 +400,64 @@ JSONBin Free Plan 单 bin 限制 100KB，实际 payload 938KB → HTTP 403。决
 
 ---
 
+## 17. 2026-06-12 Codex 变更记录（Dashboard 自家店覆盖 / Boss Table）
+
+### Git 状态
+
+| Commit | 内容 | 状态 |
+|--------|------|------|
+| `8a6dbc5` | `Fix dashboard self coverage and tier rendering` | 已 commit + push 到 GitHub `main` |
+| `02c26dd` | `Restore boss table tier display` | 已 commit + push 到 GitHub `main` |
+
+当前本地 `git status`：clean。
+
+### `8a6dbc5` 包含的主要修复
+
+| 范围 | 内容 |
+|------|------|
+| Master model code | 新增 / 修正 `F766 = Z Flip 7`，用于 Z Flip 7 256GB / 512GB exact SKU mapping |
+| Self link rendering | Dashboard 读取 self row 时保留 `variantName`，避免只看 `name` 导致 tier / SKU 来源丢失 |
+| Tablet LTE 显示 | `normalizeModelKey()` 改为：手机可把 LTE 显示成 4G；`Tab ... LTE` 不再强制变 `4G`，tablet 保留 WiFi / LTE / 5G |
+| Boss table tier fallback | 当 `v.tier` 为空时，可从 `variantName` / `name` 解析 tier 信息，避免 self rows 被 `if (!ct) continue` 丢掉 |
+| Audit exact matching | 手机默认 5G 系列允许 `A26 5G 256GB` 与 `A26 256GB` 视为同一 exact SKU；tablet 仍必须区分 WiFi / LTE / 5G |
+
+### `02c26dd` 恢复 Boss Table 显示规则
+
+用户确认：`A / B / C` 是 SKU 变体标识，不是价格层级，不应在 Boss Table 渲染成独立行。
+
+当前规则：
+
+| 输入来源 | 内部处理 | Boss Table 显示 |
+|----------|----------|-----------------|
+| `A / ...` | 参与价格计算，归到 `Standard` | 不显示 `A` 行 |
+| `B / ...` | 参与价格计算，归到 `Standard` | 不显示 `B` 行 |
+| `C / ...` | 参与价格计算，归到 `Standard` | 不显示 `C` 行 |
+| `Basic` | 参与价格计算 | 显示 `Basic` |
+| `Promo` | 参与价格计算 | 显示 `Promo` |
+| `SET A` | 参与价格计算 | 显示 `SET A` |
+| `Standard` | 参与价格计算 | 显示 `Standard` |
+
+Boss Table 当前可渲染 tier 顺序：
+
+```js
+['Basic', 'Promo', 'SET A', 'Standard']
+```
+
+注意：不要把 `A / B / C` 改回 `null` 或直接丢弃，否则 Tab A11 这类 self rows 会再次因为 `if (!ct) continue` 从 Boss Table 计算中消失。正确做法是“内部参与计算，前端不显示 A/B/C 行”。
+
+### 部署状态
+
+`02c26dd` 已 push 到 GitHub。Codex 第一次在仓库根目录执行 `npx vercel deploy --prod --yes` 失败，原因是 Vercel CLI 在 `/mnt/c/D3` 根目录推断 project name 失败。正确部署目录应为：
+
+```bash
+cd /mnt/c/D3/d3-price
+npx vercel deploy --prod --yes
+```
+
+Claude / Codex 接手时请先确认 production 是否已经部署到包含 `02c26dd` 的版本。
+
+---
+
 ## 更新规范
 
 每次有重大决定或架构变化，**由做出该决定的 AI 更新此文件并注明日期**。
