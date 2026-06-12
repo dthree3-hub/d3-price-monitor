@@ -34,11 +34,12 @@
 - 自家手机/平板：审计 0 异常。`S25 512GB`=RM3559、`S25+ 512GB`=RM4135、各容量(256/512/1TB)+各颜色全保留。
 - 自家可穿戴：Watch 8 各细分 / Watch Ultra 2025 / Buds 4 / Buds 4 Pro 已进 D1。带码 listing→具体型号；无码无连接信息的变体（如「Watch8 40mm Graphite」）→ 泛型「Watch 8」（无信息可细分，正常）。
 - **竞品 A/B/C：已用新解析器重抓**（2026-06-12 08:20 D3 all，70/71，同步 71 条）。D1 max_updated `2026-06-12 08:20:03`。例外：Spray Gadget A37 5G (`54857330691`) 本轮反爬失败未刷新，仍旧数据。
-- **⚠️ D1 孤儿行**：6-key UNIQUE 下，凡「model 解析结果变了」的 listing，旧 fallback model 行不会被新行覆盖→残留孤儿（TAC 手表那 22 条即此类，已清）。**全库规模未知，见 0.3 P2B 审计**。
+- **⚠️ D1 孤儿行（P2B 已审计）**：6-key UNIQUE 含 `model`，凡「model 解析结果变了」的 listing，旧 model 行不被新行覆盖→残留孤儿。**规模：18 个 item_id、~265 旧行（≈D1 总量 10%）**，集中在竞品混合 listing（Spray Gadget 10 / Deal Direct 6 / TAC 2；自家店 0）。例：S25↔S25 FE、S25↔S25+、S25 5G↔S25、A11↔Tab A11 4G、S10 FE↔Tab S10 FE WiFi。**未清理**（仅 TAC 那 22 条已清）。
 
 ### 0.3 待办（给 Codex）
 - ~~**P2**：竞品(A/B/C)用当前解析器正常重抓~~ **✅ 已完成**（2026-06-12 08:20 D3 all，70/71，同步 71，走 runOnce 原样同步）。**遗留**：① Spray Gadget A37 5G `54857330691` 反爬失败未刷新，需补抓一次；② 其它 listing 的 D1 孤儿行未排查 → P2B。
-- **P2B — D1 孤儿行审计（只审计，勿删/勿改 D1）**：6-key 副作用会让任何「model 解析结果改变」的 listing 留下旧 fallback model 孤儿行（如 TAC 手表那 22 条）。**先摸清规模，不全库清理。** 统计：① 有多少 item_id 同时存在「新 model」+「旧 fallback model(垃圾标题/营销串)」；② 列 Top 20 最严重案例（`item_id` / `shop` / `old rows` / `new rows`）。**只出 audit report，不 DELETE、不改 D1。** 老板要先知道问题规模再决定是否清理。
+- ~~**P2B — D1 孤儿行审计**~~ **✅ 已完成（2026-06-12，只读）**。方法：拉全库 (item,model,updated_at) 分组，按 item 找「最新批 updated_at」，仅旧批次行=孤儿（fresh/stale 对比，model 无关，比"长标题"判据稳健）。**结果：18 个 item_id 有孤儿，~265 旧行（≈10%）**；竞品混合 listing 为主（B 10/A 6/C 2，自家 0）。Top 案例：43568342488(S25→S25 FE,52)、29524548527(S25→S25+,42)、49707960484(S26→S26+,36)、43972190362(A11→Tab A11 4G,32)、23521617323(S25 5G→S25,15)。**根因=6-key 含 model；本周每次改型号标签就长一批孤儿。Dashboard 后果：同一 SKU 出现两个矛盾型号。** 未做任何 DELETE/写库。
+- **P2C — 永久修复：防止 orphan 再产生（设计中，待确认）**：治本要改 Worker `~/d3-price-monitor/d3-worker/src/index.js` 的 `/api/sync`（现为纯 6-key upsert）。候选方案：(A) **每 item 先清后插**——对 payload 内每个有 ≥1 变体的 item，先 `DELETE WHERE shop_id,item_id` 再 INSERT 全部新行（D1 batch 原子；guard：0 变体的 item 不删，避免失败抓取清空数据）；(B) upsert 后扫 `DELETE WHERE item_id∈本次同步 AND updated_at<本次T`；(C) 改 UNIQUE 键为变体内在身份 `(shop_id,item_id,variant_name)`，model 降为普通列（需先验证 variant_name 唯一稳定，属 schema 迁移风险高）。**先确认方案再动代码。方案落地+验证后，才制定 D1 历史孤儿清理计划（P2D）。**
 - **records.json 累积**：每轮 D3 only 会按 item 累积重复（旧记录可能覆盖新记录→D1 grabbed_at 偏旧）。**根治**：在 runOnce 同步前加「每 shopId:itemId 留 grabbedAt 最新」去重。临时手动：`node scripts/raw-sync-self.mjs <去重后的自家records>`。
 - **A16 4G/5G**：在 master 但全链路无数据，确认是否在售/该监控。
 - **sync-cloud-retry.mjs**：`officialModelFor` 混合 listing 误映射，修或弃用。
