@@ -39,6 +39,44 @@ function normalizeSpaces(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+// ── TAC 手表简写解析（仅 shop C 的 listing 9812470630 这种格式）──
+// 卖家用极简写：W8/W6 = Watch 8/6、W8 CLASSIC = Watch 8 Classic、W ULRA = Watch Ultra(把 ULTRA 拼成 ULRA)。
+// 连接性：BH = 蓝牙(BT)、LTE = LTE；尺寸 40/44/46MM。门控正则要求款式名以 "W6/W8/W ULRA" 开头，
+// 手机(S/A/Z)、平板(Tab/S1x)绝不会以此开头 → 只命中手表，不影响其它 parser 路径。
+// Watch 6 / Watch Ultra 2024 自家店不卖、无可比项 → 给干净标签但不进 master（Leon 已确认）。
+const TAC_WATCH_SHORTHAND_RE = /^W\s*(?:6|8|ULRA|ULTRA)\b/i;
+
+function tacWatchColor(name) {
+  // 颜色可能与年份/尺寸粘连(如 "2025WHITE")，故用子串匹配(本函数已被严格门控，不会误伤其它品类)。
+  const s = String(name || '').toUpperCase();
+  if (/GRAPHITE/.test(s)) return 'Graphite';
+  if (/SILVER|SILV/.test(s)) return 'Silver';
+  if (/GRAY|GREY/.test(s)) return 'Gray';
+  if (/BLACK/.test(s)) return 'Black';
+  if (/WHITE/.test(s)) return 'White';
+  if (/BLUE/.test(s)) return 'Blue';
+  return '';
+}
+
+function resolveTacWatchShorthand(name) {
+  if (!TAC_WATCH_SHORTHAND_RE.test(name)) return null;
+  const s = String(name).toUpperCase();
+  const net = /\bLTE\b/.test(s) ? 'LTE' : 'BT'; // BH(默认) = 蓝牙；显式 LTE = LTE
+  const size = (s.match(/\b(40|44|46)\s*MM\b/) || [])[1] || '';
+  let model = '';
+  if (/^W\s*(?:ULRA|ULTRA)\b/i.test(name)) {
+    const year = (s.match(/(?<![0-9])(2024|2025)(?![0-9])/) || [])[1] || '2025'; // 年份可能与颜色粘连(2024WHITE)
+    model = `Watch Ultra ${year}`; // Ultra canonical 不带 BT/LTE 后缀(对齐 master L705)
+  } else if (/^W\s*8\s*CLASSIC\b/i.test(name)) {
+    model = `Watch 8 Classic 46mm ${net}`; // Classic 仅 46mm
+  } else if (/^W\s*8\b/i.test(name)) {
+    model = size ? `Watch 8 ${size}mm ${net}` : `Watch 8 ${net}`;
+  } else if (/^W\s*6\b/i.test(name)) {
+    model = size ? `Watch 6 ${size}mm ${net}` : `Watch 6 ${net}`;
+  }
+  return model || null;
+}
+
 function normalizeCapacity(raw) {
   const text = normalizeSpaces(raw).replace(/[()]/g, '');
   // 抠容量前先去掉型号 token（不限行首，全局）——否则像 "S25+ 256GB" 的 "25+256" 会被误当 RAM+ROM。
@@ -200,6 +238,22 @@ export function parseVariantDescriptor(rawName, context = {}) {
       rawName: name || 'Default variant',
       model: wearable.canonical,
       color: extractColor(name, '', wTier, wearable.canonical) || '',
+      capacity: '',
+      tier: wTier || '',
+      confidence: 'confirmed',
+    };
+  }
+
+  // ── TAC 手表简写优先（仅 W6/W8/W ULRA 这种格式，门控见 resolveTacWatchShorthand）──
+  // 放在厂方码之后、通用 extractModel 之前：这类款式名无厂方码、也不匹配 "Watch N" 正则，
+  // 否则会回退到营销标题变成垃圾 model。手表无 GB 容量(尺寸已在型号里)。
+  const tacWatchModel = resolveTacWatchShorthand(name);
+  if (tacWatchModel) {
+    const wTier = extractTier(name);
+    return {
+      rawName: name || 'Default variant',
+      model: tacWatchModel,
+      color: tacWatchColor(name),
       capacity: '',
       tier: wTier || '',
       confidence: 'confirmed',
