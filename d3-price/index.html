@@ -2638,6 +2638,8 @@ function escapeAttribute(value) {
     let s = String(mk).replace(/\s+/g, ' ').trim();
     // [Claude] S10/S11 是平板：裸名补 Tab 前缀（竞品「S10 FE」「S11」并入「Tab …」，修自家空白）
     s = s.replace(/^S(1[01])\b/i, 'Tab S$1');
+    // [Claude] Tab A11 / A11+ 平板：竞品旧数据裸名「A11」补 Tab，避免拆多行 + 消除 ⚠️ 未知型号
+    s = s.replace(/^(A11\+?)\b/i, 'Tab $1');
     // [Codex] 手机 LTE→4G；平板(Tab)保留 LTE 不强转 4G
     if (!/^Tab\b/i.test(s)) s = s.replace(/\bLTE\b/gi, '4G');
     // [Claude] A 系列 5G-only(A26/36/37/56) 去冗余 5G；S23~S26 默认 5G 去冗余（S25/S25 5G 合并一行）
