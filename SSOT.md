@@ -39,7 +39,14 @@
 ### 0.3 待办（给 Codex）
 - ~~**P2**：竞品(A/B/C)用当前解析器正常重抓~~ **✅ 已完成**（2026-06-12 08:20 D3 all，70/71，同步 71，走 runOnce 原样同步）。**遗留**：① Spray Gadget A37 5G `54857330691` 反爬失败未刷新，需补抓一次；② 其它 listing 的 D1 孤儿行未排查 → P2B。
 - ~~**P2B — D1 孤儿行审计**~~ **✅ 已完成（2026-06-12，只读）**。方法：拉全库 (item,model,updated_at) 分组，按 item 找「最新批 updated_at」，仅旧批次行=孤儿（fresh/stale 对比，model 无关，比"长标题"判据稳健）。**结果：18 个 item_id 有孤儿，~265 旧行（≈10%）**；竞品混合 listing 为主（B 10/A 6/C 2，自家 0）。Top 案例：43568342488(S25→S25 FE,52)、29524548527(S25→S25+,42)、49707960484(S26→S26+,36)、43972190362(A11→Tab A11 4G,32)、23521617323(S25 5G→S25,15)。**根因=6-key 含 model；本周每次改型号标签就长一批孤儿。Dashboard 后果：同一 SKU 出现两个矛盾型号。** 未做任何 DELETE/写库。
-- **P2C — 永久修复：防止 orphan 再产生（设计中，待确认）**：治本要改 Worker `~/d3-price-monitor/d3-worker/src/index.js` 的 `/api/sync`（现为纯 6-key upsert）。候选方案：(A) **每 item 先清后插**——对 payload 内每个有 ≥1 变体的 item，先 `DELETE WHERE shop_id,item_id` 再 INSERT 全部新行（D1 batch 原子；guard：0 变体的 item 不删，避免失败抓取清空数据）；(B) upsert 后扫 `DELETE WHERE item_id∈本次同步 AND updated_at<本次T`；(C) 改 UNIQUE 键为变体内在身份 `(shop_id,item_id,variant_name)`，model 降为普通列（需先验证 variant_name 唯一稳定，属 schema 迁移风险高）。**先确认方案再动代码。方案落地+验证后，才制定 D1 历史孤儿清理计划（P2D）。**
+- **P2C — 永久修复：每 item「先清后插」（方案 A，已选定，待 review 后部署）**。改动点：Worker `~/d3-price-monitor/d3-worker/src/index.js` 的 `/api/sync`（现为纯 6-key upsert）。设计：
+  - **① 实现位置**：`/api/sync` 构建语句的循环 + 批处理；按 item 分组，每个 item 的 `DELETE`+全部 `INSERT` 进**同一个 `env.DB.batch()`**（D1 batch=事务，原子）。
+  - **② DELETE 条件**：`DELETE FROM variant_prices WHERE shop_id=? AND item_id=?`，绑 (rec.shopId, rec.itemId)，只清这一条 listing。**Guard**：仅对「本次带 ≥1 有效变体(v.model 非空)」的 item 发 DELETE；失败/空抓取的 item 不删，旧数据保留。
+  - **③ price_history**：不受影响（独立追加表，单独批量写，永不删）。
+  - **④ D1 更新时间**：不受影响（现 upsert 本就每次刷新 updated_at；A 等价，且孤儿不再以旧时间滞留→更准）。
+  - **⑤ 删除量**：全量 D3 all(71 item) 删 ~2386 行、插 ~2121 行，**净清 ~265 历史孤儿**；语句仅 +1 DELETE/item；不碰非清单内 344 行。
+  - **不碰**：schema/migrations、UNIQUE 键、`runOnce.syncCloudRecords`(红线)、`price_history`。部署 `cd ~/d3-price-monitor/d3-worker && npx wrangler deploy`。
+  - **下一步**：本地测试通过 + 老板 review → 部署 → 再制定 D1 历史孤儿清理 **P2D**（A 部署后重抓即自动清掉可重抓 item 的孤儿，剩下的另清）。
 - **records.json 累积**：每轮 D3 only 会按 item 累积重复（旧记录可能覆盖新记录→D1 grabbed_at 偏旧）。**根治**：在 runOnce 同步前加「每 shopId:itemId 留 grabbedAt 最新」去重。临时手动：`node scripts/raw-sync-self.mjs <去重后的自家records>`。
 - **A16 4G/5G**：在 master 但全链路无数据，确认是否在售/该监控。
 - **sync-cloud-retry.mjs**：`officialModelFor` 混合 listing 误映射，修或弃用。
