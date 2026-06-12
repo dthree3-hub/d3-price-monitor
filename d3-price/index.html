@@ -2531,6 +2531,9 @@ function escapeAttribute(value) {
   .boss-legend button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   .boss-legend button .cnt{display:inline-flex;min-width:18px;height:18px;padding:0 5px;align-items:center;justify-content:center;border-radius:999px;background:rgba(158,61,44,.12);color:#9e3d2c;font-size:11px;font-weight:800}
   .boss-legend button.active .cnt{background:rgba(255,255,255,.28);color:#fff}
+  .refresh-now-btn{padding:8px 16px;border:none;border-radius:10px;background:var(--accent);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+  .refresh-now-btn:hover{filter:brightness(1.08)}
+  .refresh-now-btn:disabled{opacity:.5;cursor:default}
   .boss-filter{margin-top:14px}
   .boss-filter h3{margin:0 0 4px}
   .gap-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-top:12px}
@@ -2969,6 +2972,7 @@ function escapeAttribute(value) {
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, TAC Mobiles, and Urban Republic. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
+      '<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>' +
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
@@ -2994,6 +2998,21 @@ function escapeAttribute(value) {
       if (typeof render === 'function') render();
       else bossRender();
     }; });
+    const refreshBtn = sec.querySelector('#bossRefreshNow');
+    if (refreshBtn) refreshBtn.onclick = async () => {
+      const msgEl = sec.querySelector('#bossRefreshMsg');
+      refreshBtn.disabled = true;
+      if (msgEl) msgEl.textContent = 'Sending request…';
+      try {
+        const r = await fetch('https://d3-price-worker.dthree.workers.dev/api/trigger', { method: 'POST' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (msgEl) msgEl.textContent = '✅ Hermes notified. The page auto-refreshes every 3 min once scraping finishes (may take up to one full cycle).';
+      } catch (e) {
+        if (msgEl) msgEl.textContent = '❌ Request failed: ' + e.message;
+      } finally {
+        setTimeout(() => { refreshBtn.disabled = false; }, 5000);
+      }
+    };
   }
 
   if (typeof window.render === 'function') {
