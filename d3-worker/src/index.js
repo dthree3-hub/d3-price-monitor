@@ -44,6 +44,90 @@ function rowsToRecords(rows) {
   return Array.from(map.values());
 }
 
+// ── Google Sheets 只读：服务账号 JWT(WebCrypto，Worker 非 Node) → Take back (S) ──
+const b64urlBuf = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64urlStr = (s) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+function pemToPkcs8(pem) {
+  const body = String(pem).replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '').replace(/\s+/g, '');
+  const bin = atob(body);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+}
+
+async function getGoogleToken(saJson) {
+  const sa = JSON.parse(saJson);
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64urlStr(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claim = b64urlStr(JSON.stringify({
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now, exp: now + 3600,
+  }));
+  const signingInput = `${header}.${claim}`;
+  const key = await crypto.subtle.importKey('pkcs8', pemToPkcs8(sa.private_key),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput));
+  const assertion = `${signingInput}.${b64urlBuf(sig)}`;
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
+  });
+  if (!res.ok) throw new Error(`google token ${res.status}`);
+  const j = await res.json();
+  if (!j.access_token) throw new Error('no access_token');
+  return j.access_token;
+}
+
+// A 列 "A06 6+128 5G (A066)" → "A06 5G 128GB"；无 RAM+存储(手表/buds/配件/标题) → null。
+// 前端再过 normalizeModelKey + toLowerCase 与 dashboard mk 匹配(大小写不敏感)。
+function parseSkuKey(a) {
+  let s = String(a || '').trim();
+  if (!s) return null;
+  s = s.replace(/\([^)]*\)/g, ' ');                  // 去 (A066)/(S938) 代码
+  const cap = s.match(/(\d+)\+(\d+)\s*(TB|GB)?/i);    // RAM+存储，核心 + 两侧无空格(避开 "S25+ 12")
+  if (!cap) return null;
+  const storage = `${cap[2]}${(cap[3] || 'GB').toUpperCase()}`;
+  const net = /\b5G\b/i.test(s) ? '5G' : (/\b(4G|LTE)\b/i.test(s) ? '4G' : (/\bwifi\b/i.test(s) ? 'WiFi' : ''));
+  const model = s.slice(0, cap.index)
+    .replace(/\b(5G|4G|LTE|wifi)\b/ig, ' ')
+    .replace(/\bwith\s+KB\b/ig, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (!model) return null;
+  return `${model}${net ? ' ' + net : ''} ${storage}`;
+}
+
+function toTakeBack(v) {
+  const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// 读 Sheet「Samsung」tab：A 列型号、H 列 Take back (S)。返回 { [parsedKey]: take_back }。
+async function fetchTakeBackRows(env) {
+  if (!env.GOOGLE_SHEET_ID) throw new Error('missing GOOGLE_SHEET_ID');
+  if (!env.GOOGLE_SERVICE_ACCOUNT_JSON) throw new Error('missing GOOGLE_SERVICE_ACCOUNT_JSON');
+  const tab = env.GOOGLE_CSP_TAB || 'Samsung';
+  const range = env.GOOGLE_CSP_RANGE || `${tab}!A2:H300`;
+  const token = await getGoogleToken(env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}/values/${encodeURIComponent(range)}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`sheets ${res.status}`);
+  const vals = (await res.json()).values || [];
+  const rows = {};
+  for (const row of vals) {
+    const key = parseSkuKey(row[0]);   // A 列
+    const tb = toTakeBack(row[7]);      // H 列 Take back (S)
+    if (!key || tb == null) continue;
+    if (!(key in rows)) rows[key] = tb; // first-wins：表上方为准
+  }
+  return rows;
+}
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
@@ -59,6 +143,25 @@ export default {
         ORDER BY shop_id, item_id, model, tier, capacity
       `).all();
       return json({ records: rowsToRecords(results) });
+    }
+
+    // ── GET /api/csp ───────────────────────────────────────────────────────────
+    // 只读 Google Sheet「Samsung」tab 的 Take back (S)(H列)，A列型号解析成 dashboard key。
+    // 缓存 45s 防刷 Google；失败返回 {ok:false,error,rows:{}}(前端保留上次成功值)。
+    if (pathname === '/api/csp' && request.method === 'GET') {
+      const cache = caches.default;
+      const cacheKey = new Request(new URL('/api/csp', request.url).toString());
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+      try {
+        const rows = await fetchTakeBackRows(env);
+        const res = json({ ok: true, updatedAt: new Date().toISOString(), count: Object.keys(rows).length, rows });
+        res.headers.set('Cache-Control', 'public, max-age=45');
+        await cache.put(cacheKey, res.clone());
+        return res;
+      } catch (e) {
+        return json({ ok: false, error: String(e?.message || e), rows: {} });
+      }
     }
 
     // ── Manual refresh trigger ────────────────────────────────────────────────

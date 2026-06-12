@@ -2579,6 +2579,10 @@ function escapeAttribute(value) {
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   let ourPrices = load(OUR_KEY, {});
   let cspPrices = load(CSP_KEY, {}); // { [mk]: cspPrice:number } 成本价
+  const TAKEBACK_KEY = 'd3-takeback-s-v1';
+  // Take Back ← Google Sheet「Take back (S)」(只读显示，不计算)。键 = normalizeModelKey(...).toLowerCase()
+  // 大小写不敏感(Sheet 是 "S25 ULTRA"、dashboard 是 "S25 Ultra")。localStorage 兜底=API 失败时保留上次值。
+  let takeBackByKey = load(TAKEBACK_KEY, {});
   let selectedRole = null; // null = 显示全部；'A'..'D' = 只看某对手比我们便宜的型号
   window.D3_BOSS_SELECTED_ROLE = selectedRole;
 
@@ -2934,15 +2938,10 @@ function escapeAttribute(value) {
         ourCell = `<input class="ourprice-input" data-model="${esc(mk)}" type="number" inputmode="numeric" value="${manual == null ? '' : manual}" placeholder="Enter price">`;
       }
 
-      const csp = cspPrices[mk];
-      const tb = best != null && csp != null ? best.price - csp : null;
-      const tbHtml = tb == null
-        ? '—'
-        : tb > 0
-          ? `<span class="takeback-pos">RM${fmtMoney(tb)}</span>`
-          : tb < 0
-            ? `<span class="takeback-neg">-RM${fmtMoney(Math.abs(tb))}</span>`
-            : `<span class="takeback-zero">RM0</span>`;
+      // Take Back = Google Sheet「Take back (S)」最终值，按 mk 匹配(大小写不敏感)。Dashboard 不计算。
+      // 解析不到 / H 列为空 → takeBackByKey 无此键 → 显示 —。
+      const tb = takeBackByKey[mk.toLowerCase()];
+      const tbHtml = (tb == null || tb === '') ? '—' : `<span class="takeback-pos">RM${fmtMoney(tb)}</span>`;
 
       const srcList = sources.get(mk) || [];
       const needsVerify = !isKnownSamsungModel(mk);
@@ -3004,6 +3003,7 @@ function escapeAttribute(value) {
     if (refreshBtn) refreshBtn.onclick = async () => {
       const msgEl = sec.querySelector('#bossRefreshMsg');
       refreshBtn.disabled = true;
+      fetchCsp(); // Refresh 立即刷新 Take Back（独立于 Hermes 抓取触发）
       if (msgEl) msgEl.textContent = 'Sending request…';
       try {
         const r = await fetch('https://d3-price-worker.dthree.workers.dev/api/trigger', { method: 'POST' });
@@ -3017,11 +3017,33 @@ function escapeAttribute(value) {
     };
   }
 
+  // Take Back ← Google Sheet（Worker /api/csp）。启动 + 每30s + Refresh 拉取；成功才覆盖，失败保留上次值。
+  async function fetchCsp() {
+    try {
+      const r = await fetch('https://d3-price-worker.dthree.workers.dev/api/csp', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      if (d && d.ok && d.rows && typeof d.rows === 'object') {
+        const map = {};
+        for (const [rawKey, tb] of Object.entries(d.rows)) {
+          if (tb == null || tb === '') continue;
+          map[normalizeModelKey(rawKey).toLowerCase()] = tb; // 与 dashboard mk 一致(大小写不敏感)
+        }
+        takeBackByKey = map;
+        save(TAKEBACK_KEY, map); // 缓存最近一次成功值
+        bossRender();
+      }
+      // d.ok===false / 无 rows → 保留上次值（takeBackByKey 不动）
+    } catch (e) { /* API 失败 → 保留上一次成功值，不清空 */ }
+  }
+
   if (typeof window.render === 'function') {
     const orig = window.render;
     window.render = function () { orig.apply(this, arguments); bossRender(); };
   }
   bossRender();
+  fetchCsp();
+  setInterval(fetchCsp, 30000);
 })();
 
     </script>

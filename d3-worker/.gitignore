@@ -1,0 +1,4 @@
+
+# wrangler local secrets (never commit)
+.dev.vars
+.wrangler/
