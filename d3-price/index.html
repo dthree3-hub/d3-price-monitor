@@ -2633,7 +2633,15 @@ function escapeAttribute(value) {
   const normalizeModelKey = (mk) => {
     if (!mk) return null;
     let s = String(mk).replace(/\s+/g, ' ').trim();
+    // [Claude] S10/S11 是平板：裸名补 Tab 前缀（竞品「S10 FE」「S11」并入「Tab …」，修自家空白）
+    s = s.replace(/^S(1[01])\b/i, 'Tab S$1');
+    // [Codex] 手机 LTE→4G；平板(Tab)保留 LTE 不强转 4G
     if (!/^Tab\b/i.test(s)) s = s.replace(/\bLTE\b/gi, '4G');
+    // [Claude] A 系列 5G-only(A26/36/37/56) 去冗余 5G；S23~S26 默认 5G 去冗余（S25/S25 5G 合并一行）
+    s = s.replace(/\b(A(?:26|36|37|56))\s*5G\b/gi, '$1');
+    s = s.replace(/\b(S2[3-6](?:\s*\+|\s*Ultra|\s*FE)?)\s*5G\b/gi, '$1');
+    // [Claude] 平板默认 WiFi：去独立 WiFi 词，让「Tab S10 FE WiFi」与「Tab S10 FE」合并；4G/5G 仍分开
+    s = s.replace(/\bWi[\s-]?Fi\b/gi, '');
     return s.replace(/\s+/g, ' ').trim();
   };
   // Known Samsung model families sold in MY (base name without storage/connectivity)
@@ -2656,7 +2664,7 @@ function escapeAttribute(value) {
       .replace(/\s+/g, ' ').trim();
     return SAMSUNG_KNOWN_FAMILIES.has(fam);
   };
-  // Sort key: category → model number → variant (Ultra>+>base) → connectivity (4G<5G) → storage
+  // Sort key: category → model number → 产品等级(FE<Base<+<Ultra) → connectivity(4G<5G) → storage [Claude]
   const modelSortKey = (mk) => {
     const s = String(mk || '');
     let cat = 5;
@@ -2667,7 +2675,8 @@ function escapeAttribute(value) {
     else if (/^(watch|fit\s*\d|buds)/i.test(s)) cat = 4;
     const numM = s.match(/[a-zA-Z]+(\d+)/);
     const num = numM ? parseInt(numM[1]).toString().padStart(4, '0') : '0000';
-    const variant = /ultra/i.test(s) ? '2' : s.includes('+') ? '1' : '0';
+    // 产品等级：FE → FE+ → Base → Plus(+) → Ultra（与 Samsung 官方产品线一致）
+    const variant = /\bFE\s*\+/i.test(s) ? '1' : /\bFE\b/i.test(s) ? '0' : /ultra/i.test(s) ? '4' : /(?:\+|plus)/i.test(s) ? '3' : '2';
     const conn = /5g/i.test(s) ? '1' : '0';
     const storM = s.match(/(\d+)\s*(GB|TB)\b/i);
     const stor = storM ? (parseInt(storM[1]) * (/TB/i.test(storM[2]) ? 1000 : 1)).toString().padStart(6, '0') : '000000';
