@@ -2654,20 +2654,22 @@ function escapeAttribute(value) {
     'A06','A07','A15','A16','A17','A25','A26','A35','A36','A37','A55','A56','A57',
     'S23','S23+','S23 Ultra','S24','S24+','S24 Ultra','S24 FE',
     'S25','S25+','S25 Ultra','S25 FE','S26','S26+','S26 Ultra',
-    'Tab A9','Tab A11','Tab S9','Tab S9 FE','Tab S9+','Tab S9 Ultra',
-    'Tab S10','Tab S10 FE','Tab S10+','Tab S10 Ultra','Tab S10 Lite',
+    'Tab A9','Tab A11','Tab A11+','Tab S9','Tab S9 FE','Tab S9+','Tab S9 Ultra',
+    'Tab S10','Tab S10 FE','Tab S10 FE+','Tab S10+','Tab S10 Ultra','Tab S10 Lite',
     'Tab S11','Tab S11+','Tab S11 Ultra',
-    'Z Flip 5','Z Flip 6','Z Flip 7','Z Fold 5','Z Fold 6','Z Fold 7',
-    'Buds 3','Buds 3 FE','Buds 3 Pro','Buds 4','Buds 4 Pro',
-    'Watch 8','Watch 8 Classic','Watch Ultra','Fit 3',
+    'Z Flip 5','Z Flip 6','Z Flip 7','Z Flip 7 FE','Z Fold 5','Z Fold 6','Z Fold 7',
+    'Buds 3','Buds 3 FE','Buds 3 Pro','Buds 4','Buds 4 Pro','Buds Core',
+    'Watch 8','Watch 8 Classic','Watch Ultra','Watch Ultra 2025','Fit 3',
   ]);
   const isKnownSamsungModel = (mk) => {
     if (!mk) return false;
     const fam = mk
-      .replace(/\s*(4G|5G)\s*/gi, ' ')
-      .replace(/\s*\d+\s*(GB|TB)\s*$/i, '')
-      .replace(/\s+/g, ' ').trim();
-    return SAMSUNG_KNOWN_FAMILIES.has(fam);
+      .replace(/\s*\d+\s*(GB|TB)\s*$/i, '')   // 存储
+      .replace(/\b\d+\s*mm\b/gi, ' ')          // 手表尺寸 40mm/44mm/46mm
+      .replace(/\b(4G|5G|LTE|BT)\b/gi, ' ')    // 网络/连接(含手表 BT)
+      .replace(/\s+/g, ' ').trim().toLowerCase();
+    // 大小写不敏感（竞品有 "Buds 4 PRO"/"Buds CORE" 这种大写）
+    return [...SAMSUNG_KNOWN_FAMILIES].some((f) => f.toLowerCase() === fam);
   };
   // Sort key: category → model number → 产品等级(FE<Base<+<Ultra) → connectivity(4G<5G) → storage [Claude]
   const modelSortKey = (mk) => {
