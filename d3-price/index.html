@@ -1982,7 +1982,7 @@ function inferVariantMeta(rawName, context = {}) {
     if (/basic/i.test(s)) return s.match(/basic(?:\s*\d+)?/i)?.[0] || 'Basic';
     if (/gift\s*set|gift/i.test(s)) return s.match(/gift(?:\s*set|\s*\d+)?/i)?.[0] || 'Gift';
     if (/set\s*[a-z0-9]+/i.test(s)) return s.match(/set\s*[a-z0-9]+/i)?.[0] || s;
-    if (/standard/i.test(s)) return 'Standard';
+    if (/standard/i.test(s)) return 'Basic'; // Standard = Basic（合并，不单独显示 Standard 行）
     return '';
   };
   const colors = ['Awesome Icyblue','Awesome Gray','Awesome Navy','Icy Blue','P.Gold','Peach Gold','Sky Blue','Cobalt Violet','Olive','Violet','Purple','Black','White','Blue','Silver','Gray','Grey','Gold','Green','Pink','Navy','Cream'];
@@ -2745,10 +2745,10 @@ function escapeAttribute(value) {
     if (t.indexOf('promo') >= 0) return 'Promo';
     if (t.indexOf('basic') >= 0) return 'Basic';
     if (t.indexOf('set a') >= 0 || t === 'a') return 'SET A';
-    if (/^[abc]\s*\//i.test(raw)) return 'Standard';
-    if (/\/\s*standard\b/i.test(raw)) return 'Standard';
+    if (/^[abc]\s*\//i.test(raw)) return 'Basic'; // Standard = Basic（合并，不单独显示 Standard 行）
+    if (/\/\s*standard\b/i.test(raw)) return 'Basic'; // Standard = Basic（合并，不单独显示 Standard 行）
     // 有些店没有 Basic/Promo 档，档位栏直接写容量(如 Urban Republic "12GB+256GB") → 当成标准价
-    if (/\d+\s*gb|\d+\s*\+\s*\d+|\d+\s*tb/i.test(t)) return 'Standard';
+    if (/\d+\s*gb|\d+\s*\+\s*\d+|\d+\s*tb/i.test(t)) return 'Basic'; // Standard = Basic（合并，不单独显示 Standard 行）
     return null;
   };
 
@@ -2775,7 +2775,7 @@ function escapeAttribute(value) {
     '56447030': 'D',
   };
   const activeRoles = ['A', 'B', 'C', 'D'];
-  const TIER_ORDER = ['Basic', 'Promo', 'SET A', 'Standard'];
+  const TIER_ORDER = ['Basic', 'Promo', 'SET A'];
   const roleName = (role) => ROLE_NAMES[role] || role;
 
   function build() {
