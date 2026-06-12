@@ -89,6 +89,28 @@ async function getGoogleToken(saJson) {
 function parseSkuKey(a) {
   let s = String(a || '').trim();
   if (!s) return null;
+
+  // ── 平板 S10/S11（与手机不同：无 RAM+存储；可能带 "with KB"/键盘；无存储则默认 128GB）──
+  // 仅产出 "S10 FE 256GB" 这种 model[ net] storage；前端 normalizeModelKey 会补 "Tab " 前缀、去 WiFi。
+  // 手机是 S25/S26(^S2)，平板是 S10/S11(^S1[01])，互不影响。
+  if (/^S1[01]\b/i.test(s)) {
+    let x = s
+      .replace(/\([^)]*\)/g, ' ')         // 去 (X520)/(xKB)/( X keyboard)
+      .replace(/\bwith\s+KB\b/ig, ' ')     // 去 with KB
+      .replace(/-\s*[A-Za-z].*$/, ' ')     // 去 "- Gry"/"- Black" 颜色尾巴
+      .replace(/\bWi[\s-]?Fi\b/ig, ' ');   // WiFi 默认(前端也会去)
+    const tnet = /\b5G\b/i.test(x) ? '5G' : (/\b(4G|LTE)\b/i.test(x) ? '4G' : '');
+    const tst = x.match(/(\d+)\s*(TB|GB)\b/i);          // 显式存储 256GB/1TB
+    const tstorage = tst ? `${tst[1]}${tst[2].toUpperCase()}` : '128GB'; // 无存储(S10 Lite WiFi)→默认 128GB
+    const tmodel = x
+      .replace(/\b(5G|4G|LTE)\b/ig, ' ')
+      .replace(/\d+\s*(TB|GB)\b/ig, ' ')
+      .replace(/\bKB\b/ig, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (!tmodel) return null;
+    return `${tmodel}${tnet ? ' ' + tnet : ''} ${tstorage}`;
+  }
+
   s = s.replace(/\([^)]*\)/g, ' ');                  // 去 (A066)/(S938) 代码
   const cap = s.match(/(\d+)\+(\d+)\s*(TB|GB)?/i);    // RAM+存储，核心 + 两侧无空格(避开 "S25+ 12")
   if (!cap) return null;
