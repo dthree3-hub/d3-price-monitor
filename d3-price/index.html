@@ -427,7 +427,6 @@
                 <option value="Deal Direct">Deal Direct</option>
                 <option value="Spray Gadget">Spray Gadget</option>
                 <option value="TAC Mobiles">TAC Mobiles</option>
-                <option value="Urban Republic">Urban Republic</option>
                 <option value="Our Store">Our Store</option>
               </select>
             </div>
@@ -458,22 +457,6 @@
             <strong id="metricLatest" style="font-size:16px">-</strong>
           </div>
         </div>
-      </section>
-
-      <section class="report-wrap">
-        <h2 style="margin:0">Price drop report</h2>
-        <p class="muted" style="margin-top:6px">Compare the latest two captures for the same `shop_id + item_id + variant` and list the price drops.</p>
-        <div class="metrics">
-          <div class="metric">
-            <span class="muted">Dropped variants</span>
-            <strong id="metricDrops">0</strong>
-          </div>
-          <div class="metric">
-            <span class="muted">Largest drop</span>
-            <strong id="metricMaxDrop">-</strong>
-          </div>
-        </div>
-        <div id="dropList" class="report-list"></div>
       </section>
 
       <section class="table-wrap">
@@ -2439,10 +2422,20 @@ function render() {
   metricVariants.textContent = String(rows.length);
   metricShops.textContent = String(new Set(rows.map((row) => row.shopId)).size);
   metricLatest.textContent = records[0]?.grabbedAt?.replace('T', ' ').replace('Z', ' UTC') || '-';
-  metricDrops.textContent = String(drops.length);
-  metricMaxDrop.textContent = drops.length ? formatRmDisplay(drops[0].dropAmount) : '-';
+  if (metricDrops) metricDrops.textContent = String(drops.length);
+  if (metricMaxDrop) metricMaxDrop.textContent = drops.length ? formatRmDisplay(drops[0].dropAmount) : '-';
 
   renderDropList(drops);
+
+  // 默认空表：只有用搜索/店铺/系列/型号筛选或点了竞品按钮，才列出对应款式，
+  // 避免一打开就糊 100+ 行。无任何筛选时显示提示、不渲染任何产品行。
+  const hasActiveFilter = Boolean(
+    state.search || state.shopFilter || state.seriesFilter || state.modelFilter || activeBossRole()
+  );
+  if (!hasActiveFilter) {
+    tableBody.innerHTML = `<tr><td colspan="9" class="muted">Search or pick a filter above to show specific products.</td></tr>`;
+    return;
+  }
 
   if (!rows.length) {
     tableBody.innerHTML = `<tr><td colspan="9" class="muted">${escapeHtml(state.source)}</td></tr>`;
@@ -2482,6 +2475,7 @@ function render() {
 }
 
 function renderDropList(drops) {
+  if (!dropList) return;
   if (!drops.length) {
     dropList.innerHTML = `<div class="muted">${escapeHtml(state.source)} A drop report appears after the same variant has been captured at least twice.</div>`;
     return;
@@ -2774,7 +2768,7 @@ function escapeAttribute(value) {
     '271823454': 'C',
     '56447030': 'D',
   };
-  const activeRoles = ['A', 'B', 'C', 'D'];
+  const activeRoles = ['A', 'B', 'C'];
   const TIER_ORDER = ['Basic', 'Promo', 'SET A'];
   const roleName = (role) => ROLE_NAMES[role] || role;
 
@@ -2980,7 +2974,7 @@ function escapeAttribute(value) {
     const _lastUpdateText = _latestGrabbed ? `🕒 最新更新 ${new Date(_latestGrabbed).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour12: false })}（${_rel}）` : '';
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
-      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, TAC Mobiles, and Urban Republic. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
+      '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
       `<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossLastUpdate" class="muted" style="font-size:12px;margin-left:8px">${_lastUpdateText}</span> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>` +
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
