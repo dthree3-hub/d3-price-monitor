@@ -58,8 +58,17 @@ export function extractFromPdp(json) {
   const tiers = item.tier_variations ?? [];
   const models = item.models ?? [];
 
+  // 过滤页面上灰掉/不可选的 package 组合：PDP 的 is_grayout / is_clickable 就是驱动
+  // 页面置灰的字段(已在 raw 验证 is_grayout=true ⟺ is_clickable=false)。不能靠 has_stock/
+  // stock 判断——被灰掉的 SKU 仍可能 inStock:true 且带 dummy 价。每个 model 本就是单个
+  // (set × 型号颜色) 组合，过滤天然只清掉那个 tier、不动其他可选变体。
+  const visibleModels = models.filter(
+    (mdl) => mdl.is_grayout !== true && mdl.is_clickable !== false,
+  );
+  const grayedOutCount = models.length - visibleModels.length;
+
   // 每个 model 的 extinfo.tier_index 指向各 tier 的第几个选项，拼成款式名
-  const variants = models.map((mdl) => {
+  const variants = visibleModels.map((mdl) => {
     // 从所有 tier 维度重建完整款式名。Shopee 的多维变体(如「Set Package」×「Model+Color」)里，
     // mdl.name 常只含一维(如 "Set A")，会丢掉型号/容量/颜色/网络那一维 → 必须按 tier_index 拼全维度。
     const dims = (tiers.length && Array.isArray(mdl.extinfo?.tier_index))
@@ -115,6 +124,7 @@ export function extractFromPdp(json) {
       apiItemId: item.itemid ?? item.item_id ?? '',
       apiShopId: item.shopid ?? item.shop_id ?? '',
       modelCount: models.length,
+      grayedOutCount,            // 被 is_grayout/is_clickable 过滤掉的 model 数
       tierVariations: tiers.map((t) => ({
         name: t?.name || '',
         optionCount: Array.isArray(t?.options) ? t.options.length : 0,
