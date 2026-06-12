@@ -132,10 +132,21 @@ async function syncCloudRecords(records) {
   const url = process.env.D3_CLOUD_RECORDS_URL || DEFAULT_CLOUD_RECORDS_URL;
   const enabled = process.env.HERMES_SYNC_CLOUD !== '0';
   if (!enabled || !url) return { synced: false, reason: 'disabled' };
+  // 方案2：同步前按 shopId:itemId 去重，只保留最新 grabbedAt 的那条。
+  // 根因：recordKey 含 grabbedAt，records.json 每轮累积同一 listing 的新旧版本；都发会让旧的在 D1 覆盖新的。
+  // 这里只去重「发往云端的 payload」——不改 recordKey、不动 records.json 历史、不碰 6-key/映射/重试。
+  const _latestByItem = new Map();
+  for (const r of records) {
+    const k = `${r.shopId}:${r.itemId}`;
+    const prev = _latestByItem.get(k);
+    if (!prev || new Date(r.grabbedAt || 0).getTime() > new Date(prev.grabbedAt || 0).getTime()) _latestByItem.set(k, r);
+  }
+  const deduped = [..._latestByItem.values()];
+  if (deduped.length < records.length) logHermes(`同步去重: ${records.length} → ${deduped.length} 条（按 shopId:itemId 留最新 grabbedAt）`);
   const maxRecords = Number(process.env.HERMES_CLOUD_MAX_RECORDS || 120);
   const sliced = Number.isFinite(maxRecords) && maxRecords > 0
-    ? [...records].sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime()).slice(0, maxRecords)
-    : records;
+    ? [...deduped].sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime()).slice(0, maxRecords)
+    : deduped;
   // 变体价格内部字段叫 currentPrice，但 Worker /api/sync 读 v.price → 必须映射，否则价格被存成 null。
   // （sync-cloud-retry.mjs 早有此映射，runSweep 这条同步路径之前漏了。）
   const payloadRecords = sliced.map((r) => Array.isArray(r.variants)
