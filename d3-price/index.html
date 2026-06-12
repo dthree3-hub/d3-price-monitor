@@ -2636,8 +2636,8 @@ function escapeAttribute(value) {
     s = s.replace(/^(A11\+?)\b/i, 'Tab $1');
     // [Codex] 手机 LTE→4G；平板(Tab)保留 LTE 不强转 4G
     if (!/^Tab\b/i.test(s)) s = s.replace(/\bLTE\b/gi, '4G');
-    // [Claude] A 系列 5G-only(A26/36/37/56) 去冗余 5G；S23~S26 默认 5G 去冗余（S25/S25 5G 合并一行）
-    s = s.replace(/\b(A(?:26|36|37|56))\s*5G\b/gi, '$1');
+    // [Claude] A 系列 5G-only(A26/36/37/56/57) 去冗余 5G；S23~S26 默认 5G 去冗余（S25/S25 5G 合并一行）
+    s = s.replace(/\b(A(?:26|36|37|56|57))\s*5G\b/gi, '$1');
     s = s.replace(/\b(S2[3-6](?:\s*\+|\s*Ultra|\s*FE)?)\s*5G\b/gi, '$1');
     // [Claude] 平板默认 WiFi：去独立 WiFi 词，让「Tab S10 FE WiFi」与「Tab S10 FE」合并；4G/5G 仍分开
     s = s.replace(/\bWi[\s-]?Fi\b/gi, '');
