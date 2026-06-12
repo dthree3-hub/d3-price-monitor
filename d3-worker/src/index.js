@@ -19,25 +19,16 @@ function rowsToRecords(rows) {
         itemId: r.item_id,
         title: r.title,
         grabbedAt: r.grabbed_at,
-        soldOut: false, // 下面按逐款重算
         variants: [],
       });
     }
-    const soldOut = !!r.sold_out; // sold_out 列现为逐款标记
     map.get(key).variants.push({
       model: r.model,
       capacity: r.capacity,
       tier: r.tier,
       currentPrice: r.price,
       name: r.sku,
-      voucherAmount: r.voucher_amount ?? 0,
-      soldOut,
-      inStock: !soldOut,
     });
-  }
-  // 整个 listing 售罄 = 所有款式都售罄（兼容旧的「记录级 soldOut」语义）
-  for (const rec of map.values()) {
-    rec.soldOut = rec.variants.length > 0 && rec.variants.every((v) => v.soldOut);
   }
   return Array.from(map.values());
 }
@@ -52,31 +43,11 @@ export default {
     // Returns {records:[...]} compatible with existing frontend
     if (pathname === '/api/records' && request.method === 'GET') {
       const { results } = await env.DB.prepare(`
-        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, grabbed_at
+        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, grabbed_at
         FROM variant_prices
         ORDER BY shop_id, item_id, model, tier
       `).all();
       return json({ records: rowsToRecords(results) });
-    }
-
-    // ── Manual refresh trigger ────────────────────────────────────────────────
-    // 网页按钮 POST 设标记；Hermes 休息时 GET?consume=1 轮询，看到就立刻抓一圈。
-    if (pathname === '/api/trigger') {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS control (k TEXT PRIMARY KEY, v TEXT)`).run();
-      if (request.method === 'POST') {
-        await env.DB.prepare(`INSERT INTO control (k, v) VALUES ('trigger','1')
-          ON CONFLICT(k) DO UPDATE SET v='1'`).run();
-        return json({ ok: true, triggered: true });
-      }
-      if (request.method === 'GET') {
-        const consume = new URL(request.url).searchParams.get('consume') === '1';
-        const row = await env.DB.prepare(`SELECT v FROM control WHERE k='trigger'`).first();
-        const pending = row?.v === '1';
-        if (pending && consume) {
-          await env.DB.prepare(`UPDATE control SET v='0' WHERE k='trigger'`).run();
-        }
-        return json({ pending });
-      }
     }
 
     // ── POST /api/sync ────────────────────────────────────────────────────────
@@ -100,24 +71,20 @@ export default {
           stmts.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
-                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, grabbed_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                (shop_id, item_id, title, sku, model, capacity, tier, price, grabbed_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
               ON CONFLICT(shop_id, item_id, model, tier) DO UPDATE SET
                 title=excluded.title, sku=excluded.sku,
                 capacity=excluded.capacity, price=excluded.price,
-                voucher_amount=excluded.voucher_amount,
-                sold_out=excluded.sold_out,
                 grabbed_at=excluded.grabbed_at, updated_at=datetime('now')
             `).bind(
               rec.shopId, rec.itemId, rec.title || '', sku,
-              v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
-              v.voucherAmount ?? rec.voucherAmount ?? 0,
-              (v.inStock === false || rec.soldOut) ? 1 : 0,
+              v.model, v.capacity || '', v.tier || '', v.price ?? null,
               rec.grabbedAt || new Date().toISOString()
             )
           );
           // Insert history only when price actually changes
-          if (v.currentPrice != null) {
+          if (v.price != null) {
             stmts.push(
               env.DB.prepare(`
                 INSERT INTO price_history (shop_id, item_id, sku, model, tier, price, grabbed_at)
@@ -128,9 +95,9 @@ export default {
                     AND grabbed_at > datetime('now','-1 hour')
                 )
               `).bind(
-                rec.shopId, rec.itemId, sku, v.model, v.tier || '', v.currentPrice,
+                rec.shopId, rec.itemId, sku, v.model, v.tier || '', v.price,
                 rec.grabbedAt || new Date().toISOString(),
-                rec.shopId, rec.itemId, v.model, v.tier || '', v.currentPrice
+                rec.shopId, rec.itemId, v.model, v.tier || '', v.price
               )
             );
           }
@@ -161,3 +128,4 @@ export default {
     return json({ error: 'not found' }, 404);
   },
 };
+

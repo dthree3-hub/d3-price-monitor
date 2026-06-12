@@ -60,13 +60,14 @@ export function extractFromPdp(json) {
 
   // 每个 model 的 extinfo.tier_index 指向各 tier 的第几个选项，拼成款式名
   const variants = models.map((mdl) => {
-    let label = mdl.name;
-    if ((!label || label === '') && tiers.length && mdl.extinfo?.tier_index) {
-      label = mdl.extinfo.tier_index
-        .map((optIdx, tierIdx) => tiers[tierIdx]?.options?.[optIdx])
-        .filter(Boolean)
-        .join(' / ');
-    }
+    // 从所有 tier 维度重建完整款式名。Shopee 的多维变体(如「Set Package」×「Model+Color」)里，
+    // mdl.name 常只含一维(如 "Set A")，会丢掉型号/容量/颜色/网络那一维 → 必须按 tier_index 拼全维度。
+    const dims = (tiers.length && Array.isArray(mdl.extinfo?.tier_index))
+      ? mdl.extinfo.tier_index.map((optIdx, tierIdx) => tiers[tierIdx]?.options?.[optIdx]).filter(Boolean)
+      : [];
+    let label = mdl.name || '';
+    // 多维(≥2 维)时一定用重建(mdl.name 丢维度)；mdl.name 为空时也用重建；单维则保留 mdl.name(不回归)。
+    if (dims.length && (dims.length >= 2 || !label)) label = dims.join(' / ');
     const price = RM(mdl.price);
     const promo = RM(mdl.promotion_price);
     return {
@@ -74,8 +75,22 @@ export function extractFromPdp(json) {
       price,                         // 标价
       promo_price: promo,            // 促销价（有就是它更便宜）
       current: promo ?? price,       // 现在实际显示的价
-      stock: mdl.stock,
-      sold_out: mdl.stock === 0,
+      stock: mdl.stock ?? mdl.normal_stock,
+      // 售罄判断：Shopee 的 mdl.stock 常为 null，真正可靠的是 has_stock(布尔)。
+      // 严格 === false，避免字段缺失(undefined)时把全部误判成售罄。
+      sold_out: mdl.has_stock === false || mdl.stock === 0,
+      // ── trace 原始字段（Phase 1 仅用于 out/traces，不参与写库/同步）──
+      _raw: {
+        modelName: mdl.name || '',
+        dims,                                       // tier_index 拼出的各维度选项
+        tierCount: tiers.length,
+        hasStock: mdl.has_stock,
+        normalStock: mdl.normal_stock,
+        rawStock: mdl.stock,
+        priceBeforeDiscount: RM(mdl.price_before_discount),
+        modelId: mdl.model_id,
+        status: mdl.status,
+      },
     };
   });
 
@@ -86,12 +101,27 @@ export function extractFromPdp(json) {
       price: RM(item.price),
       promo_price: RM(item.price_before_discount),
       current: RM(item.price),
-      stock: item.stock,
-      sold_out: item.stock === 0,
+      stock: item.stock ?? item.normal_stock,
+      sold_out: item.has_stock === false || item.stock === 0,
     });
   }
 
-  return { title, sellerName: String(sellerName || ''), variants };
+  return {
+    title,
+    sellerName: String(sellerName || ''),
+    variants,
+    // ── trace 用：listing 级原始信息（Phase 1，不参与写库/同步）──
+    _trace: {
+      apiItemId: item.itemid ?? item.item_id ?? '',
+      apiShopId: item.shopid ?? item.shop_id ?? '',
+      modelCount: models.length,
+      tierVariations: tiers.map((t) => ({
+        name: t?.name || '',
+        optionCount: Array.isArray(t?.options) ? t.options.length : 0,
+        options: Array.isArray(t?.options) ? t.options : [],
+      })),
+    },
+  };
 }
 
 // 从 PDP 接口读「店铺 voucher」(比抠页面文字可靠)。
@@ -253,7 +283,7 @@ export async function scrapeProductViaCDP(url, {
         throw new Error('当前 Chrome 里没有这个商品的已预热页面，且本轮禁止自动跳转到新商品页。');
       }
       await Page.navigate({ url });
-      await waitForPageLoad(Page, 15000);
+      await waitForPageLoad(Page, Number(process.env.HERMES_PAGE_LOAD_TIMEOUT_MS || 20000));
     } else {
       await waitForPageLoad(Page, 5000).catch(() => {});
     }

@@ -1,7 +1,7 @@
 # D3 Price Monitor — SSOT (Single Source of Truth)
 
 > Claude 和 Codex 的共同参考文件。所有已决定的事不重复问，直接查这里。
-> Last updated: 2026-06-09
+> Last updated: 2026-06-12（本周由 Claude 完成数据准确性整治，见第 0 节交接）
 
 ---
 
@@ -9,6 +9,53 @@
 
 每次开始任务前先读这份文件。它记录了分工边界、冻结区、当前项目状态、数据格式规范。
 如果你的工作会影响数据格式、型号命名、价格规则，**先更新这份文件再动代码**。
+
+---
+
+## 0. 2026-06-11/12 最新进度交接（Claude → Codex）
+
+> 本周 Claude 完成的「数据准确性整治」。Codex 接手请先读本节。背景细节也在 Claude 自动记忆（WSL `~/.claude/projects/-home-dthree3/memory/d3-*.md`）。
+
+### 0.1 本周已完成（已部署/已验证，勿重复做）
+- **解析层**（`src/variant-parser.mjs`）：修 S10 FE+→FE、S25+→S25、LTE→5G、S25 FE 混入 S25；3383 变体 0 mismatch。
+- **records.json 去重**：593→76（按 shopId:itemId 留 grabbedAt 最新）。
+- **D1 容量+颜色塌缩（核心修复）**：`variant_prices` 表 UNIQUE 从 4-key 改成 **`UNIQUE(shop_id,item_id,model,tier,capacity,color)`** 6-key + 新增 `color`/`variant_name` 列；Worker `/api/sync` 的 ON CONFLICT、INSERT、`/api/records` SELECT 同步改。救回 ~386 个被覆盖的 SKU 价格行。库内备份表 `variant_prices_old`、`variant_prices_pre_color`；整库 export 在 `d3-worker/backups/`。
+- **前端**（`d3-price/index.html`，已部署 d3-price-seven.vercel.app）：
+  - `normalizeModelKey`：S25 5G→S25 合并；**S10/S11 裸名补 `Tab` 前缀**（竞品「S10 FE」「S11」并入「Tab …」）。
+  - **price_mode 开关**：默认「挂牌价」= 原价 − 通用封顶券（`10% capped RM5 · min spend RM50` → 每件实减 RM5，`universalVoucherDiscount`）；net 模式扣抓到的全部券（含未封顶/需领取，仅参考）。
+  - 型号排序：FE→Base→+→Ultra，容量 128→256→512→1TB。
+- **可穿戴代码优先 (P1)**（`src/variant-parser.mjs` + `src/samsung-master.mjs`）：raw 含 L320/L325/L330/L335/L500/L505/L705/R540/R640 直接定型号(confidence=confirmed)，不靠标题。canonical：Watch 8 40mm BT/LTE、Watch 8 44mm BT/LTE、Watch 8 Classic 46mm BT/LTE、Watch Ultra 2025、Buds 4、Buds 4 Pro。**仅可穿戴，手机/平板不动**（`lookupWearableByCode` 过滤）。
+- **抓到并修的 bug**：`sync-cloud-retry.mjs` 的 `officialModelFor` 在**混合 A 系列 listing** 误映射（A36→A26 5G、A37→A17，损坏自家数据）。改用 `scripts/raw-sync-self.mjs`（原样推 v.model）。
+- **Coverage 修复**：自家 listing `5276526599`（含 S25+ 512GB）曾被去重移除→加回 products.csv；保留 `27874385975`（含 S25 Ultra 1TB）。已跑 D3 only 重抓 16 条自家、同步、去重。
+
+### 0.2 当前数据状态
+- 自家手机/平板：审计 0 异常。`S25 512GB`=RM3559、`S25+ 512GB`=RM4135、各容量(256/512/1TB)+各颜色全保留。
+- 自家可穿戴：Watch 8 各细分 / Watch Ultra 2025 / Buds 4 / Buds 4 Pro 已进 D1。带码 listing→具体型号；无码无连接信息的变体（如「Watch8 40mm Graphite」）→ 泛型「Watch 8」（无信息可细分，正常）。
+- **竞品 A/B/C：仍是旧数据**（未用新解析器重抓）。前端已兜底裸名/5G，但 D1 竞品本身还旧。
+
+### 0.3 待办（给 Codex）
+- **P2**：竞品(A/B/C)用当前解析器正常重抓（runOnce/sweep）→ D1 竞品数据本身一致。走 runOnce 原样同步，**勿用 sync-cloud-retry**。
+- **records.json 累积**：每轮 D3 only 会按 item 累积重复（旧记录可能覆盖新记录→D1 grabbed_at 偏旧）。**根治**：在 runOnce 同步前加「每 shopId:itemId 留 grabbedAt 最新」去重。临时手动：`node scripts/raw-sync-self.mjs <去重后的自家records>`。
+- **A16 4G/5G**：在 master 但全链路无数据，确认是否在售/该监控。
+- **sync-cloud-retry.mjs**：`officialModelFor` 混合 listing 误映射，修或弃用。
+
+### 0.4 红线（勿违反）
+- runOnce 的 `syncCloudRecords`（Codex 修的：带 `X-D3-Secret` / `currentPrice→price` / 4 次重试）**别动别删**。
+- Worker 只部署 WSL 版 `~/d3-price-monitor/d3-worker`（`npx wrangler deploy`），**别用 `C:\D3\d3-worker`**（旧、会覆盖线上 sold_out 逻辑）。
+- 别 rotate / `wrangler secret put` `D3_CLOUD_SYNC_SECRET`；别改 `.env` 的该 secret。
+- 重推数据用 `scripts/raw-sync-self.mjs`，**别用 `sync-cloud-retry.mjs`**（会损坏混合 A 系列）。
+- 老板拒绝 CAPTCHA/反爬绕过工具；只能人工接管（`src/recovery`）。
+
+### 0.5 常用命令
+- D3 only（自家重抓+同步）：双击桌面「D3 only」或 `powershell -ExecutionPolicy Bypass -File C:\D3\scripts\windows\start-self.ps1`（自动起 Chrome CDP:9222，需小号已登录；撞 captcha 人工点一下即自动续跑）。
+- 原样重推自家：`cd /mnt/c/D3 && node scripts/raw-sync-self.mjs <records.json>`（必要时先 `DELETE FROM variant_prices WHERE shop_id=<id>`）。
+- 部署 Worker：`cd ~/d3-price-monitor/d3-worker && npx wrangler deploy`。
+- 部署前端：`cd ~/d3-price-monitor/d3-price && npx vercel --prod --yes`。
+- D1 远程查询：`cd ~/d3-price-monitor/d3-worker && npx wrangler d1 execute d3-price-db --remote --json --command "<SQL>"`。
+- 审计 v2：`cd /mnt/c/D3 && node scripts/gen-audit-v2.mjs && python3 scripts/audit_xlsx_v2.py /tmp/audit_v2.json <out.xlsx>`。
+
+### 0.6 ⚠️ 两个 clone 不同步
+本周改动分散在**两个工作副本**（同一 GitHub repo）：**解析器/scraper 改在 `C:\D3`（Windows）**；**前端/worker 改在 `~/d3-price-monitor`（WSL）**。两边各有未提交改动，**尚未 git commit/push**。Codex 接手前请先确认要不要把两边改动提交、合并、push 到 GitHub，否则两副本会越漂越远。
 
 ---
 

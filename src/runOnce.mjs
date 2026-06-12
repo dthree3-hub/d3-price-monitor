@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSnapshot } from './build-snapshot.mjs';
+import { scrapeViaCrawl4AI } from './crawl4ai-shopee.mjs';
 import { scrapeProduct, scrapeProductViaCDP } from './scraper.mjs';
 import { scrapeViaSA } from './scraperapi.mjs';
 import { parseVariantDescriptor } from './variant-parser.mjs';
+import { buildListingTrace, dumpListingTrace } from './trace.mjs';
 import {
   attachCompetitorMeta,
   buildHermesMarkdown,
@@ -46,6 +48,19 @@ function isSoftBlockError(error) {
   );
 }
 
+// 真·风控/封锁信号——只有这些才触发「连续异常就停」防封保护。
+// 「页面加载超时 / 500」属瞬时问题(慢页面/网络抖动)，不算封锁 → 跳过该条继续，不会因偶发慢页面把整轮停掉。
+function isHardBlockError(error) {
+  const text = String(error?.message || error || '').toLowerCase();
+  return (
+    text.includes('90309999') ||
+    text.includes('loading issue') ||
+    text.includes('page unavailable') ||
+    text.includes('log in to continue') ||
+    text.includes('login to continue')
+  );
+}
+
 function isRetriableCdpFetchError(error) {
   const text = String(error?.message || error || '').toLowerCase();
   return text.includes('[cdp_fetch]') || text.includes('页面内 fetch 失败');
@@ -77,7 +92,21 @@ function variantVoucherAmount(price, vouchers) {
 function normalizeScrapedProduct(product, scraped) {
   const voucherFixed = toNonNegativeNumberOrZero(scraped.voucherAmount);
   const vouchers = Array.isArray(scraped.vouchers) ? scraped.vouchers : [];
-  return attachCompetitorMeta({
+  const parsedVariants = scraped.variants.map((variant) => ({
+    name: variant.variant,
+    ...parseVariantDescriptor(variant.variant, {
+      title: scraped.title,
+      itemModel: product.our_product,
+      ourProduct: product.our_product,
+    }),
+    currentPrice: variant.current,
+    originalPrice: variant.price,
+    promoPrice: variant.promo_price,
+    stock: variant.stock,
+    inStock: !variant.sold_out,
+    voucherAmount: variantVoucherAmount(variant.current, vouchers),
+  }));
+  const record = attachCompetitorMeta({
     schemaVersion: 1,
     grabbedAt: scraped.scrapedAt || new Date().toISOString(),
     pageUrl: product.product_url,
@@ -89,21 +118,14 @@ function normalizeScrapedProduct(product, scraped) {
     // 记录级仅保留无门槛固定额(单一数字无法表达百分比/满减)；逐款折扣放在 variant.voucherAmount。
     voucherAmount: voucherFixed,
     soldOut: Array.isArray(scraped.variants) && scraped.variants.length > 0 && scraped.variants.every((v) => v.sold_out),
-    variants: scraped.variants.map((variant) => ({
-      name: variant.variant,
-      ...parseVariantDescriptor(variant.variant, {
-        title: scraped.title,
-        itemModel: product.our_product,
-        ourProduct: product.our_product,
-      }),
-      currentPrice: variant.current,
-      originalPrice: variant.price,
-      promoPrice: variant.promo_price,
-      stock: variant.stock,
-      inStock: !variant.sold_out,
-      voucherAmount: variantVoucherAmount(variant.current, vouchers),
-    })),
+    variants: parsedVariants,
   }, product);
+  // Phase 1：产出可审计 trace（逐 SKU 解析+评分+价格链+完整性）dump 到 out/traces/。
+  // 纯副作用：只写文件，不改 record、不碰写库/同步。HERMES_TRACE=0 可关。
+  if (process.env.HERMES_TRACE !== '0') {
+    try { dumpListingTrace(buildListingTrace(product, scraped, parsedVariants)); } catch {}
+  }
+  return record;
 }
 
 async function syncCloudRecords(records) {
@@ -111,19 +133,43 @@ async function syncCloudRecords(records) {
   const enabled = process.env.HERMES_SYNC_CLOUD !== '0';
   if (!enabled || !url) return { synced: false, reason: 'disabled' };
   const maxRecords = Number(process.env.HERMES_CLOUD_MAX_RECORDS || 120);
-  const payloadRecords = Number.isFinite(maxRecords) && maxRecords > 0
+  const sliced = Number.isFinite(maxRecords) && maxRecords > 0
     ? [...records].sort((a, b) => new Date(b.grabbedAt).getTime() - new Date(a.grabbedAt).getTime()).slice(0, maxRecords)
     : records;
+  // 变体价格内部字段叫 currentPrice，但 Worker /api/sync 读 v.price → 必须映射，否则价格被存成 null。
+  // （sync-cloud-retry.mjs 早有此映射，runSweep 这条同步路径之前漏了。）
+  const payloadRecords = sliced.map((r) => Array.isArray(r.variants)
+    ? { ...r, variants: r.variants.map((v) => ({ ...v, price: v.price ?? v.currentPrice ?? v.originalPrice ?? null })) }
+    : r);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ records: payloadRecords }),
-  });
-  if (!response.ok) {
-    throw new Error(`Cloud sync failed: HTTP ${response.status}`);
+  // 带重试：Cloudflare secret 改完后边缘节点会短时间不一致(间歇 401)，单试一次会丢整轮数据。
+  const maxAttempts = Math.max(1, Number(process.env.HERMES_CLOUD_SYNC_RETRIES || 4));
+  const body = JSON.stringify({ records: payloadRecords });
+  const syncSecret = process.env.D3_CLOUD_SYNC_SECRET || '';
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(syncSecret ? { 'X-D3-Secret': syncSecret } : {}),
+  };
+  let lastStatus = 0;
+  let lastErr = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+      });
+      if (response.ok) return { synced: true, url, records: payloadRecords.length, attempts: attempt };
+      lastStatus = response.status;
+      const secretState = syncSecret ? `secretLen=${syncSecret.length}` : 'secret=missing';
+      logHermes(`云端同步第 ${attempt}/${maxAttempts} 次失败: HTTP ${response.status} (${secretState})${attempt < maxAttempts ? '，稍后重试' : ''}`);
+    } catch (error) {
+      lastErr = error.message || String(error);
+      logHermes(`云端同步第 ${attempt}/${maxAttempts} 次出错: ${lastErr}${attempt < maxAttempts ? '，稍后重试' : ''}`);
+    }
+    if (attempt < maxAttempts) await sleep(5000 * attempt); // 5s,10s,15s 退避
   }
-  return { synced: true, url, records: payloadRecords.length };
+  throw new Error(`Cloud sync failed after ${maxAttempts} attempts: HTTP ${lastStatus}${lastErr ? ` / ${lastErr}` : ''}`);
 }
 
 async function scrapeOne(product, mode) {
@@ -144,6 +190,11 @@ async function scrapeOne(product, mode) {
   if (mode === 'browser') {
     const scraped = await scrapeProduct(product.product_url, { headless: process.env.HEADLESS !== '0' });
     return normalizeScrapedProduct(product, scraped);
+  }
+
+  if (mode === 'crawl4ai') {
+    const scraped = await scrapeViaCrawl4AI(product.product_url);
+    return normalizeScrapedProduct(product, { ...scraped, scrapedAt: new Date().toISOString() });
   }
 
   const result = await scrapeViaSA(product.product_url);
@@ -226,16 +277,15 @@ export async function runOnce() {
       const message = `${product.competitor || '-'} | ${product.product_url} | ${error.message || String(error)}`;
       failures.push(message);
       logHermes(`抓取失败: ${message}`);
-      if (isSoftBlockError(error)) {
+      if (isHardBlockError(error)) {
         consecutiveSoftBlocks += 1;
-        logHermes(`连续风控/页面异常计数: ${consecutiveSoftBlocks}/${abortSoftBlocks}`);
+        logHermes(`连续风控/封锁计数: ${consecutiveSoftBlocks}/${abortSoftBlocks}`);
         if (consecutiveSoftBlocks >= abortSoftBlocks) {
-          logHermes('本轮提前结束：连续出现 Shopee 风控/页面异常，停止继续抓取，等待下轮恢复。');
+          logHermes('本轮提前结束：连续 Shopee 风控/封锁(90309999/要登录)，停止本轮防封，等待下轮恢复。');
           break;
         }
-      } else {
-        consecutiveSoftBlocks = 0;
       }
+      // 页面加载超时 / 500 等瞬时失败：跳过该条继续，不计入停止阈值（不因偶发慢页面停掉整轮）。
     }
 
     if (itemDelayMs > 0) {
@@ -402,16 +452,16 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
         logHermes(`碰到验证你没在限时内解（${error.name}），停止本轮。下一轮或手动按钮再抓。`);
         break;
       }
-      if (isSoftBlockError(error)) {
+      // 只有真·风控/封锁(90309999/要登录/page unavailable)才触发「连续 N 停」防封；
+      // 页面加载超时/500 等瞬时失败 → 跳过该条继续，不因偶发慢页面把整轮停掉。
+      if (isHardBlockError(error)) {
         consecutiveSoftBlocks += 1;
-        logHermes(`连续风控/页面异常计数: ${consecutiveSoftBlocks}/${abortSoftBlocks}`);
+        logHermes(`连续风控/封锁计数: ${consecutiveSoftBlocks}/${abortSoftBlocks}`);
         if (consecutiveSoftBlocks >= abortSoftBlocks) {
           aborted = true;
           logHermes('本轮提前结束：连续 Shopee 风控/封锁，停止本轮，等待下一轮/手动触发。');
           break;
         }
-      } else {
-        consecutiveSoftBlocks = 0;
       }
     }
     // 随机延迟（防封关键：节奏不规律 + 慢）
@@ -436,10 +486,17 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
     await sendTelegramMessage(buildTelegramMessage(changes));
   }
 
+  let cloudSync = { ok: false, info: '' };
   try {
     const cloud = await syncCloudRecords(merged);
-    if (cloud.synced) logHermes(`云端数据已同步: ${cloud.url}（${cloud.records} 条最新记录）`);
+    if (cloud.synced) {
+      cloudSync = { ok: true, info: `${cloud.records} 条` };
+      logHermes(`云端数据已同步: ${cloud.url}（${cloud.records} 条最新记录）`);
+    } else {
+      cloudSync = { ok: false, info: cloud.reason || '未同步' };
+    }
   } catch (error) {
+    cloudSync = { ok: false, info: error.message || String(error) };
     logHermes(`云端同步失败: ${error.message || String(error)}`);
   }
 
@@ -461,7 +518,7 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
   });
 
   logHermes(`[sweep] 完成 组=${group}，抓 ${incoming.length}/${selected.length} 条，失败 ${failures.length}${aborted ? '（因风控提前停止）' : ''}`);
-  return { group, products: selected.length, scraped: incoming.length, failures, changes, aborted, latestTimestamp };
+  return { group, products: selected.length, scraped: incoming.length, failures, changes, aborted, latestTimestamp, cloudSync };
 }
 
 function canonicalizeEntryPath(filePath) {
