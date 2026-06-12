@@ -2979,7 +2979,6 @@ function escapeAttribute(value) {
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
-      `<div class="boss-legend">${legend}</div>` +
       `<div style="overflow-x:auto"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
     sec.querySelectorAll('input[data-model]').forEach((el) => { el.onchange = () => {
       const mk = el.dataset.model;

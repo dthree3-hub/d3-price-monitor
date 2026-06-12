@@ -15,11 +15,10 @@ PDP 接口 JSON → `src/scraper.mjs extractFromPdp()` 整理出 variants → `d
 - `d3-worker/src/index.js` `/api/sync`：每 item `DELETE WHERE shop_id+item_id` + `INSERT 当前变体`，同一 `env.DB.batch()`（事务原子）；无有效变体的 item 不 DELETE；price_history 不动。commit `aa82b0b`。
 - **2026-06-12 已 deploy**：Worker Version `b7f7553f`。实测跑一轮 D3 all 后 `variant_prices` 2150→1748（净删 ~402 orphan）。先清后插生效。
 
-### 任务 A：过滤页面上 disabled / 灰掉的 package 组合 — ❌ 已回退，方案不成立，待重新定信号
-- 原方案（commit `42dee59`）：`extractFromPdp` 跳过 `is_grayout===true || is_clickable===false` 的 model。**已 revert（`45d8078`），WSL + C:\D3 + D3-runtime 三处 scraper 都回到无过滤。**
-- **回退原因（实测）**：单抓 A06（itemId `2040352813`，**自家店 shopId 54618012「Our Store」**，不是 Spray Gadget）拿 raw 验证——75 个 model **全部 `is_grayout=false`/`is_clickable=true`**，`grayedOutCount=0`，删不掉任何东西。CLAUDE.md 旧前提「`is_grayout=true ⟺ is_clickable=false`」只在 **Tab A11** 成立，**对 A06 不成立**。
-- A06 唯一能区分「占位/不可买」组合的信号是 **RM999 dummy 价**（`price=99900000` + `promotion_price=null` + `price_before_discount=0` + `promotion_id=0`，6 个）。`promotion_id==0` 单独不够（6 个真组合也是 0）。注意 Green `Promo set`=RM561.81 是**真实可买促销**（有真 promotion_id），不一定该消失。
-- **待 Leon 拍板**：① 页面选 Green 后 Promo（561.81）到底灰不灰；② 信号用 RM999 占位价 / 读 DOM 置灰态 / 暂不做。Leon 原则「靠页面 disabled 状态、不靠价格」与 A06 现实（PDP 无 disabled 信号）冲突，需重新确认。
+### 任务 A：过滤页面上 disabled / 灰掉的 package 组合 — ✅ 已关闭（不做，前提不成立）
+- **2026-06-12 Leon 看了实际 A06 页面：选 Green 后 Promo / Promo(+Charger) 并没有置灰，可以正常选。** 即「灰掉组合」这个前提本身是误判，根本没有 disabled 态要过滤 → **任务 A 取消，不做**。
+- scraper 保持**无过滤**现状（revert `45d8078` 保留）。RM999 dummy 占位组合 Leon 确认无问题，不处理。
+- 留作背景知识：A06 PDP 75 个 model 全是 `is_grayout=false`/`is_clickable=true`，PDP 接口里**没有** per-selection 置灰信号（那是前端选中后客户端算的）；`is_grayout=true⟺is_clickable=false` 只在 Tab A11 成立。以后若真要做"按页面置灰过滤"，得用 CDP 在选中态下读实时 DOM，别再指望 PDP 接口字段。
 
 ### 前端 Dashboard 三处改动（`d3-price/index.html`）— ✅ 已 push + 已部署
 commit `7257135`，已 `vercel --prod` 上线（https://d3-price-seven.vercel.app ）：
