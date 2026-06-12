@@ -2729,9 +2729,7 @@ function escapeAttribute(value) {
     if (t.indexOf('promo') >= 0) return 'Promo';
     if (t.indexOf('basic') >= 0) return 'Basic';
     if (t.indexOf('set a') >= 0 || t === 'a') return 'SET A';
-    if (/^a\s*\//i.test(raw)) return 'A';
-    if (/^b\s*\//i.test(raw)) return 'B';
-    if (/^c\s*\//i.test(raw)) return 'C';
+    if (/^[abc]\s*\//i.test(raw)) return 'Standard';
     if (/\/\s*standard\b/i.test(raw)) return 'Standard';
     // 有些店没有 Basic/Promo 档，档位栏直接写容量(如 Urban Republic "12GB+256GB") → 当成标准价
     if (/\d+\s*gb|\d+\s*\+\s*\d+|\d+\s*tb/i.test(t)) return 'Standard';
@@ -2761,7 +2759,7 @@ function escapeAttribute(value) {
     '56447030': 'D',
   };
   const activeRoles = ['A', 'B', 'C', 'D'];
-  const TIER_ORDER = ['A', 'B', 'C', 'Basic', 'Promo', 'SET A', 'Standard'];
+  const TIER_ORDER = ['Basic', 'Promo', 'SET A', 'Standard'];
   const roleName = (role) => ROLE_NAMES[role] || role;
 
   function build() {
