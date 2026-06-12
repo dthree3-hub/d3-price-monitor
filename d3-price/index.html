@@ -2969,10 +2969,15 @@ function escapeAttribute(value) {
         srcDetailRow;
     }).join('');
 
+    // 最新更新时间：取所有记录里最新的 grabbedAt，显示在 Refresh 按钮旁 [Claude]
+    const _latestGrabbed = (state.records || []).reduce((m, r) => { const t = new Date(r.grabbedAt || 0).getTime(); return Number.isFinite(t) && t > m ? t : m; }, 0);
+    const _mins = _latestGrabbed ? Math.round((Date.now() - _latestGrabbed) / 60000) : -1;
+    const _rel = _mins < 0 ? '' : _mins < 1 ? '刚刚' : _mins < 60 ? `${_mins} 分钟前` : `${Math.floor(_mins / 60)} 小时前`;
+    const _lastUpdateText = _latestGrabbed ? `🕒 最新更新 ${new Date(_latestGrabbed).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour12: false })}（${_rel}）` : '';
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, TAC Mobiles, and Urban Republic. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
-      '<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>' +
+      `<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossLastUpdate" class="muted" style="font-size:12px;margin-left:8px">${_lastUpdateText}</span> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>` +
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
       `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
