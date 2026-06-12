@@ -294,6 +294,21 @@ export function parseVariantDescriptor(rawName, context = {}) {
     }
   }
 
+  // (c) 网络回填：双网络手机(A06/07/16/17) 型号已命中但仍无网络、且款式名也没写网络 →
+  //     从「同型号」的标题网络补齐。例：Deal Direct A07 LTE listing，变体名 "A07 Black"(无网络)
+  //     + 标题 "A07 LTE 4G" → A07 4G。仅限 A06/07/16/17（不碰 5G-only 手机/平板/mixed）。
+  //     titleModel 对 mixed listing 已是 ''(isMixedLabel 守卫) → 天然不触发，自家混合 listing 不受影响。
+  if (/^A(?:06|07|16|17)\b/i.test(model) && !/\b(?:4G|5G|LTE|WiFi)\b/i.test(model)
+      && titleModel && /\b(?:4G|5G|LTE|WiFi)\b/i.test(titleModel)) {
+    const baseOf = (s) => s.replace(/\b(?:4G|5G|LTE|WiFi)\b/ig, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (baseOf(titleModel) === baseOf(model)) { // 禁止跨型号回填（A17 变体 + A07 标题 → base 不等 → 不补）
+      const titleNet = /\bwifi\b/i.test(titleModel) ? 'WiFi'
+        : /\b(?:lte|4g)\b/i.test(titleModel) ? '4G' // LTE 归一为 4G，与对手 A07 4G 对齐
+        : '5G';
+      model = `${model} ${titleNet}`;
+    }
+  }
+
   // 平板（A11 / S10 / S11 / Tab）：网络是 WiFi 或 LTE，且可能写在款式名任意位置；
   // 若型号还没带网络，就从款式名补上，让 WiFi 款和 LTE 款分成不同型号（对手价才对得上）。
   // 款式名没写网络时默认 WiFi（平板基础款=WiFi，LTE/5G 款都会明确标网络）——
