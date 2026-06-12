@@ -27,14 +27,18 @@
 - **可穿戴代码优先 (P1)**（`src/variant-parser.mjs` + `src/samsung-master.mjs`）：raw 含 L320/L325/L330/L335/L500/L505/L705/R540/R640 直接定型号(confidence=confirmed)，不靠标题。canonical：Watch 8 40mm BT/LTE、Watch 8 44mm BT/LTE、Watch 8 Classic 46mm BT/LTE、Watch Ultra 2025、Buds 4、Buds 4 Pro。**仅可穿戴，手机/平板不动**（`lookupWearableByCode` 过滤）。
 - **抓到并修的 bug**：`sync-cloud-retry.mjs` 的 `officialModelFor` 在**混合 A 系列 listing** 误映射（A36→A26 5G、A37→A17，损坏自家数据）。改用 `scripts/raw-sync-self.mjs`（原样推 v.model）。
 - **Coverage 修复**：自家 listing `5276526599`（含 S25+ 512GB）曾被去重移除→加回 products.csv；保留 `27874385975`（含 S25 Ultra 1TB）。已跑 D3 only 重抓 16 条自家、同步、去重。
+- **P1 — TAC 手表简写解析**（`src/variant-parser.mjs`，commit `34b4d13`，已 push main）：竞品 TAC listing `C-9812470630` 变体用极简写——`W8`/`W6`=Watch 8/6、`W8 CLASSIC`=Watch 8 Classic、`W ULRA`=Watch Ultra（卖家把 ULTRA 拼成 ULRA）、`BH`=蓝牙(BT)、`LTE`、40/44/46MM。旧 parser 无厂方码、也不匹配 `Watch N` 正则 → 回退营销标题成垃圾 model。新增**严格门控** `resolveTacWatchShorthand`（仅款式名以 `W6/W8/W ULRA` 开头才触发；手机 S/A/Z、平板 Tab/S1x 绝无此开头，不受影响）。映射：W8 BH 40/44MM→Watch 8 40mm/44mm BT(对上 master L320/L330)、W8 CLASSIC BH→Watch 8 Classic 46mm BT(L500)、W ULRA LTE 2025→Watch Ultra 2025(L705)；**Watch 6 / Watch Ultra 2024 自家不卖→干净标签但不进 master**（Leon 确认）。全库扫描验证门控只命中此 listing(28 变体×2 轮)、解析后全 watch 品类、0 误伤手机/平板。
+- **P2 — TAC 手表重抓 + D1 残留清理**：用新 parser 跑 D3 all（2026-06-12 08:20，抓 70/71、失败 1=Spray Gadget A37 5G 反爬 90309999；同步去重 227→71、云端同步成功 71 条）。TAC `9812470630` 在 records.json + D1 + Dashboard 三处一致 = **28 条干净手表型号**。**6-key 副作用**：新 model 与旧垃圾 model 键不同 → 旧 22 行成孤儿残留（updated_at 06:44:49 未被覆盖）。按安全流程（COUNT→列样本→限定 DELETE→复查）清掉：`DELETE FROM variant_prices WHERE item_id='9812470630' AND model LIKE '(READY STOCK)%'` → 删 22 行、剩 28 干净、Dashboard 无垃圾标题。**仅删此 listing 的垃圾 model 行，未碰新行/其它 item。**
 
 ### 0.2 当前数据状态
 - 自家手机/平板：审计 0 异常。`S25 512GB`=RM3559、`S25+ 512GB`=RM4135、各容量(256/512/1TB)+各颜色全保留。
 - 自家可穿戴：Watch 8 各细分 / Watch Ultra 2025 / Buds 4 / Buds 4 Pro 已进 D1。带码 listing→具体型号；无码无连接信息的变体（如「Watch8 40mm Graphite」）→ 泛型「Watch 8」（无信息可细分，正常）。
-- **竞品 A/B/C：仍是旧数据**（未用新解析器重抓）。前端已兜底裸名/5G，但 D1 竞品本身还旧。
+- **竞品 A/B/C：已用新解析器重抓**（2026-06-12 08:20 D3 all，70/71，同步 71 条）。D1 max_updated `2026-06-12 08:20:03`。例外：Spray Gadget A37 5G (`54857330691`) 本轮反爬失败未刷新，仍旧数据。
+- **⚠️ D1 孤儿行**：6-key UNIQUE 下，凡「model 解析结果变了」的 listing，旧 fallback model 行不会被新行覆盖→残留孤儿（TAC 手表那 22 条即此类，已清）。**全库规模未知，见 0.3 P2B 审计**。
 
 ### 0.3 待办（给 Codex）
-- **P2**：竞品(A/B/C)用当前解析器正常重抓（runOnce/sweep）→ D1 竞品数据本身一致。走 runOnce 原样同步，**勿用 sync-cloud-retry**。
+- ~~**P2**：竞品(A/B/C)用当前解析器正常重抓~~ **✅ 已完成**（2026-06-12 08:20 D3 all，70/71，同步 71，走 runOnce 原样同步）。**遗留**：① Spray Gadget A37 5G `54857330691` 反爬失败未刷新，需补抓一次；② 其它 listing 的 D1 孤儿行未排查 → P2B。
+- **P2B — D1 孤儿行审计（只审计，勿删/勿改 D1）**：6-key 副作用会让任何「model 解析结果改变」的 listing 留下旧 fallback model 孤儿行（如 TAC 手表那 22 条）。**先摸清规模，不全库清理。** 统计：① 有多少 item_id 同时存在「新 model」+「旧 fallback model(垃圾标题/营销串)」；② 列 Top 20 最严重案例（`item_id` / `shop` / `old rows` / `new rows`）。**只出 audit report，不 DELETE、不改 D1。** 老板要先知道问题规模再决定是否清理。
 - **records.json 累积**：每轮 D3 only 会按 item 累积重复（旧记录可能覆盖新记录→D1 grabbed_at 偏旧）。**根治**：在 runOnce 同步前加「每 shopId:itemId 留 grabbedAt 最新」去重。临时手动：`node scripts/raw-sync-self.mjs <去重后的自家records>`。
 - **A16 4G/5G**：在 master 但全链路无数据，确认是否在售/该监控。
 - **sync-cloud-retry.mjs**：`officialModelFor` 混合 listing 误映射，修或弃用。
