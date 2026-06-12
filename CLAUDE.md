@@ -10,6 +10,7 @@ PDP 接口 JSON → `src/scraper.mjs extractFromPdp()` 整理出 variants → `d
 ## 进行中任务（交接重点）
 
 > 📄 **最新一轮改动详见 [`HANDOFF-2026-06-12.md`](HANDOFF-2026-06-12.md)**（已 push）。下面是滚动状态。
+> 🧩 **下一步设计：[`DESIGN-takeback-csp.md`](DESIGN-takeback-csp.md)** —— Take Back ← Google Sheets 接入方案（Worker `/api/csp`，已设计未实施，开工前需 Leon 确认第 9 节两点）。
 
 ### 任务 B：P2C orphan 永久修复（先清后插）— ✅ 已部署完成
 - `d3-worker/src/index.js` `/api/sync`：每 item `DELETE WHERE shop_id+item_id` + `INSERT 当前变体`，同一 `env.DB.batch()`（事务原子）；无有效变体的 item 不 DELETE；price_history 不动。commit `aa82b0b`。
