@@ -59,6 +59,9 @@ function normalizeCapacity(raw) {
   if (bareStorage) return `${bareStorage[1]}GB`;
   const compactStorage = withoutModel.match(/(\d+)(GB|TB)/i);
   if (compactStorage) return `${compactStorage[1]}${compactStorage[2].toUpperCase()}`;
+  // 粘在字母后的存储（如「11Ultra512」的 512、「Ultra256」的 256）——无 GB 也无左边界
+  const glued = source.match(/(?<![0-9])(128|256|512|1024)(?![0-9])/);
+  if (glued) return glued[1] === '1024' ? '1TB' : `${glued[1]}GB`;
   return '';
 }
 
@@ -208,7 +211,8 @@ export function parseVariantDescriptor(rawName, context = {}) {
   // 标题含 "/" 但各段同型号(如 "A11+ WIFI / A11 PLUS WIFI") → 取该型号，避免误当 mixed 丢成基础款。
   const titleConsistentModel = !titleModel ? consistentSlashModel(title) : '';
   // itemModel 必须能解析出真型号才采信；像 "Our Store Listing" 这种占位文字不是型号，丢弃（否则会当成型号显示）。
-  const itemModelResolved = (!isMixedLabel(itemModel) && extractModel(itemModel)) ? itemModel : '';
+  // 用提取出的「干净型号」，不是整串 itemModel/keyword——否则像「A06 5G A06 4G l 6.7' HD…」这种长标题会被整串当成 model。
+  const itemModelResolved = (!isMixedLabel(itemModel) && extractModel(itemModel)) ? extractModel(itemModel) : '';
   let model = modelFromName || titleModel || titleConsistentModel || itemModelResolved || '';
   // 仅当型号是靠「标题单一型号」推出来的，才信任标题里的容量补全（标题是单型号时容量也唯一可信）。
   const usedTitleConsistent = !modelFromName && !titleModel && !!titleConsistentModel && model === titleConsistentModel;
@@ -219,6 +223,10 @@ export function parseVariantDescriptor(rawName, context = {}) {
   if (/FE\s*\+|FE\s*PLUS/i.test(name) && /\bFE\b/i.test(model) && !/FE\+/i.test(model)) {
     model = model.replace(/\bFE\b/i, 'FE+');
   }
+  // 变体名写了 Ultra / +（但 model 来自标题/itemModel 只是基础 S2x）→ 升级。
+  // 例：S25 混合 listing 的变体「Ultra(256GB)」→ S25 Ultra；「+(256GB)」→ S25+。
+  if (/\bUltra\b/i.test(name) && /^S2\d$/.test(model)) model = `${model} Ultra`;
+  else if (/(?:^|[(\s])\+|\bPlus\b/i.test(name) && /^S2\d$/.test(model)) model = `${model}+`;
   // (b) 网络：款式名明确写了 WiFi/LTE/4G/5G → 覆盖型号里(可能来自标题)的网络。
   //     例：A17 listing 的变体名 "LTE (8+256GB)" 应 A17 4G，而非标题的 A17 5G（4G/5G 串的根因）。
   const nameNet = /\bwifi\b/i.test(name) ? 'WiFi'
