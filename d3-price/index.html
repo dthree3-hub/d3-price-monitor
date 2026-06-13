@@ -1573,7 +1573,8 @@ function formatRmDisplay(value) {
 }
 
 function activeBossRole() {
-  return window.D3_BOSS_SELECTED_ROLE || '';
+  const r = window.D3_BOSS_SELECTED_ROLE || '';
+  return r === 'cheaper' ? '' : r; // 'cheaper' 是 boss 表伪过滤(只筛型号行)，不在记录层按角色过滤
 }
 
 function roleLabel(role) {
@@ -2675,8 +2676,8 @@ function escapeAttribute(value) {
     let cat = 5;
     if (/^a\d/i.test(s)) cat = 0;
     else if (/^s\d/i.test(s)) cat = 1;
-    else if (/^tab/i.test(s)) cat = 2;
-    else if (/^z\s*(flip|fold)/i.test(s)) cat = 3;
+    else if (/^z\s*(flip|fold)/i.test(s)) cat = 2; // Z Fold/Flip 属手机系列，排在 Tablet 之前
+    else if (/^tab/i.test(s)) cat = 3;             // Tablet 排手机之后(watch/buds=4 仍在其后)
     else if (/^(watch|fit\s*\d|buds)/i.test(s)) cat = 4;
     const numM = s.match(/[a-zA-Z]+(\d+)/);
     const num = numM ? parseInt(numM[1]).toString().padStart(4, '0') : '0000';
@@ -2871,10 +2872,15 @@ function escapeAttribute(value) {
     for (const L of activeRoles) cheaperByRole[L].sort((a, b) => b.save - a.save);
 
     const legend = `<button data-role="all" class="${selectedRole == null ? 'active' : ''}">Us — show all</button>` +
-      activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('');
+      activeRoles.map((L) => `<button data-role="${L}" class="${selectedRole === L ? 'active' : ''}">${esc(roleName(L))} <span class="cnt">${cheaperByRole[L].length}</span></button>`).join('') +
+      `<button data-role="cheaper" class="${selectedRole === 'cheaper' ? 'active' : ''}" title="只显示三家竞品最低价低过我们的型号">🔥 Cheaper Than Us <span class="cnt">${gaps.length}</span></button>`;
 
     let filterHtml = '';
-    if (selectedRole) {
+    if (selectedRole === 'cheaper') {
+      filterHtml = gaps.length
+        ? `<div class="boss-filter"><h3>🔥 ${gaps.length} model${gaps.length > 1 ? 's' : ''} where a competitor is cheaper than us</h3></div>`
+        : `<div class="boss-filter"><div class="muted">No competitor is cheaper than us on any model right now. 🎉</div></div>`;
+    } else if (selectedRole) {
       const list = cheaperByRole[selectedRole];
       const name = esc(roleName(selectedRole));
       if (!list.length) {
@@ -2885,13 +2891,16 @@ function escapeAttribute(value) {
       }
     }
 
-    const visibleRoles = selectedRole ? [selectedRole] : activeRoles;
-    const displayedModelKeys = selectedRole
-      ? modelKeys.filter((mk) => {
-          const byRole = models.get(mk);
-          return byRole[selectedRole] && byRole[selectedRole].min != null;
-        })
-      : modelKeys;
+    const cheaperSet = new Set(gaps.map((g) => g.mk)); // 竞品最低价 < 我们最低价 的型号(=gaps)
+    const visibleRoles = (selectedRole && selectedRole !== 'cheaper') ? [selectedRole] : activeRoles;
+    const displayedModelKeys = selectedRole === 'cheaper'
+      ? modelKeys.filter((mk) => cheaperSet.has(mk))
+      : selectedRole
+        ? modelKeys.filter((mk) => {
+            const byRole = models.get(mk);
+            return byRole[selectedRole] && byRole[selectedRole].min != null;
+          })
+        : modelKeys;
 
     const head = `<tr><th style="width:180px">Model</th><th style="width:170px">Our price</th>${visibleRoles.map((L) => `<th style="width:170px">${esc(roleName(L))}</th>`).join('')}<th style="width:180px">👑 Lowest competitor</th><th style="width:110px">Gap</th><th style="width:110px">Take back</th></tr>`;
     const body = displayedModelKeys.map((mk) => {
