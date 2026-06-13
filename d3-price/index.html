@@ -2645,13 +2645,19 @@ function escapeAttribute(value) {
     s = s.replace(/^S(1[01])\b/i, 'Tab S$1');
     // [Claude] Tab A11 / A11+ 平板：竞品旧数据裸名「A11」补 Tab，避免拆多行 + 消除 ⚠️ 未知型号
     s = s.replace(/^(A11\+?)\b/i, 'Tab $1');
-    // [Codex] 手机 LTE→4G；平板(Tab)保留 LTE 不强转 4G
-    if (!/^Tab\b/i.test(s)) s = s.replace(/\bLTE\b/gi, '4G');
+    // [Codex] 手机 LTE→4G；平板(Tab)与手表(Watch)保留 LTE 不强转 4G
+    if (!/^Tab\b/i.test(s) && !/^Watch\b/i.test(s)) s = s.replace(/\bLTE\b/gi, '4G');
+    // [Claude] Tab A11/A11+ 平板：历史 4G / LTE 4G / LTE 写法统一成 LTE（WiFi 款保留 WiFi，不并入）
+    if (/^Tab A11\+?\b/i.test(s) && !/\bWi[\s-]?Fi\b/i.test(s)) {
+      s = s.replace(/\b(?:LTE\s+)?4G\b/gi, 'LTE');  // "Tab A11 4G" / "Tab A11 LTE 4G" → LTE
+      s = s.replace(/\bLTE(?:\s+LTE)+\b/gi, 'LTE'); // 去重 "LTE LTE"
+    }
     // [Claude] A 系列 5G-only(A26/36/37/56/57) 去冗余 5G；S23~S26 默认 5G 去冗余（S25/S25 5G 合并一行）
     s = s.replace(/\b(A(?:26|36|37|56|57))\s*5G\b/gi, '$1');
     s = s.replace(/\b(S2[3-6](?:\s*\+|\s*Ultra|\s*FE)?)\s*5G\b/gi, '$1');
-    // [Claude] 平板默认 WiFi：去独立 WiFi 词，让「Tab S10 FE WiFi」与「Tab S10 FE」合并；4G/5G 仍分开
-    s = s.replace(/\bWi[\s-]?Fi\b/gi, '');
+    // [Claude] 平板默认 WiFi：去独立 WiFi 词，让「Tab S10 FE WiFi」与「Tab S10 FE」合并；4G/5G 仍分开。
+    //         Tab A11/A11+ 例外：保留 WiFi 标签以与 LTE 款区分（不显示成裸 "Tab A11 128GB"）。
+    if (!/^Tab A11\+?\b/i.test(s)) s = s.replace(/\bWi[\s-]?Fi\b/gi, '');
     return s.replace(/\s+/g, ' ').trim();
   };
   // Known Samsung model families sold in MY (base name without storage/connectivity)
@@ -2685,6 +2691,19 @@ function escapeAttribute(value) {
     else if (/^z\s*(flip|fold)/i.test(s)) cat = 2; // Z Fold/Flip 属手机系列，排在 Tablet 之前
     else if (/^tab/i.test(s)) cat = 3;             // Tablet 排手机之后(watch/buds=4 仍在其后)
     else if (/^(watch|fit\s*\d|buds)/i.test(s)) cat = 4;
+    if (cat === 4) {
+      // 配件排序：Buds(0) → Fit(1) → Watch(2)，Watch 排最后。
+      const sub = /buds/i.test(s) ? '0' : /\bfit\b/i.test(s) ? '1' : '2';
+      const nm4 = s.match(/[a-zA-Z]+\s*(\d+)/);
+      const n4 = nm4 ? parseInt(nm4[1]).toString().padStart(4, '0') : '0000';
+      const ultra4 = /ultra/i.test(s) ? '1' : '0';
+      const year4 = (s.match(/\b(20\d\d)\b/) || [])[1] || '0000';
+      const classic4 = /classic/i.test(s) ? '1' : '0';
+      const pro4 = /\bpro\b/i.test(s) ? '1' : '0';
+      // Watch: 先非 Ultra(按代号) 后 Ultra(按年份)，Classic 排同代基础款之后；Buds: Core(0000)→3→4→4 Pro。
+      const inner4 = sub === '2' ? `${ultra4}|${n4}|${year4}|${classic4}` : `${n4}|${pro4}`;
+      return `4|${sub}|${inner4}`;
+    }
     const numM = s.match(/[a-zA-Z]+(\d+)/);
     const num = numM ? parseInt(numM[1]).toString().padStart(4, '0') : '0000';
     // 产品等级：FE → FE+ → Base → Plus(+) → Ultra（与 Samsung 官方产品线一致）

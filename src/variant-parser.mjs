@@ -283,8 +283,11 @@ export function parseVariantDescriptor(rawName, context = {}) {
   else if (/(?:^|[(\s])\+|\bPlus\b/i.test(name) && /^S2\d$/.test(model)) model = `${model}+`;
   // (b) 网络：款式名明确写了 WiFi/LTE/4G/5G → 覆盖型号里(可能来自标题)的网络。
   //     例：A17 listing 的变体名 "LTE (8+256GB)" 应 A17 4G，而非标题的 A17 5G（4G/5G 串的根因）。
+  // 平板(Tab / A11 / A11+ / S10 / S11)保留 LTE；手机 LTE→4G(A07/A17 仍归一为 4G)。
+  const isTabletModel = /^(?:Tab|A11\+?|S1[01])\b/i.test(model);
   const nameNet = /\bwifi\b/i.test(name) ? 'WiFi'
-    : /\b(?:lte|4g)\b/i.test(name) ? '4G'
+    : /\blte\b/i.test(name) ? (isTabletModel ? 'LTE' : '4G')
+    : /\b4g\b/i.test(name) ? '4G'
     : /\b5g\b/i.test(name) ? '5G' : '';
   if (nameNet) {
     if (/\b(?:4G|5G|LTE|WiFi)\b/i.test(model)) {
