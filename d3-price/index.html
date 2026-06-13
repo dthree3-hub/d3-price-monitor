@@ -2686,7 +2686,9 @@ function escapeAttribute(value) {
     const conn = /5g/i.test(s) ? '1' : '0';
     const storM = s.match(/(\d+)\s*(GB|TB)\b/i);
     const stor = storM ? (parseInt(storM[1]) * (/TB/i.test(storM[2]) ? 1000 : 1)).toString().padStart(6, '0') : '000000';
-    return `${cat}|${num}|${variant}|${conn}|${stor}`;
+    // Z 系列内部：Flip 排在 Fold 前（非 Z 恒为 '0'，对其它系列无影响）
+    const ztype = /\bflip\b/i.test(s) ? '0' : /\bfold\b/i.test(s) ? '1' : '0';
+    return `${cat}|${num}|${ztype}|${variant}|${conn}|${stor}`;
   };
   const capacityLabelOf = (n) => {
     const text = String(n || '').trim();
