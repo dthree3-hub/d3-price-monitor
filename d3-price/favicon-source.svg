@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Flat, no gradient, no shadow. White tile + bold black D mark. -->
+  <rect width="512" height="512" fill="#ffffff"/>
+  <!-- Outer D silhouette (black) -->
+  <path fill="#111111" d="M 120,120 L 282,120 A 110,110 0 0 1 392,230 L 392,282 A 110,110 0 0 1 282,392 L 120,392 Z"/>
+  <!-- Inner counter (white window) -->
+  <path fill="#ffffff" d="M 192,192 L 282,192 A 38,38 0 0 1 320,230 L 320,282 A 38,38 0 0 1 282,320 L 192,320 Z"/>
+  <!-- Square notch tab (black) at top-left of the counter -->
+  <rect x="192" y="192" width="72" height="72" fill="#111111"/>
+</svg>
