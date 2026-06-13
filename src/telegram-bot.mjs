@@ -11,10 +11,59 @@ import {
   logHermes,
   readTelegramOffset,
   sendTelegramReply,
+  telegramApi,
   writeTelegramOffset,
 } from './lib-hermes.mjs';
 import { runOnce } from './runOnce.mjs';
 import { writeManualSignal } from './recovery/TelegramNotifier.mjs';
+import { isPriceQuery, handlePriceQuery, buildMarketContext } from './price-lookup.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// 单实例锁：out/telegram-bot.lock 存当前 PID，防止重复启动导致 getUpdates 409 Conflict
+const LOCK_FILE = path.join(import.meta.dirname, '..', 'out', 'telegram-bot.lock');
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM'; // 存在但无权限也算活着
+  }
+}
+
+// 成功取锁返回 true；已有存活实例返回 false
+function acquireSingleInstanceLock() {
+  try {
+    fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
+    if (fs.existsSync(LOCK_FILE)) {
+      const prev = Number(String(fs.readFileSync(LOCK_FILE, 'utf8')).trim());
+      if (Number.isInteger(prev) && prev > 0 && prev !== process.pid && isPidAlive(prev)) {
+        return false; // 另一个实例还活着
+      }
+      // 否则是陈旧锁（进程已死），覆盖即可
+    }
+    fs.writeFileSync(LOCK_FILE, String(process.pid));
+  } catch (error) {
+    logHermes(`单实例锁写入失败（放行）：${error.message || String(error)}`);
+    return true;
+  }
+
+  const release = () => {
+    try {
+      if (fs.existsSync(LOCK_FILE)
+        && Number(String(fs.readFileSync(LOCK_FILE, 'utf8')).trim()) === process.pid) {
+        fs.unlinkSync(LOCK_FILE);
+      }
+    } catch {
+      // 释放失败忽略：下次启动会按 PID 存活判定为陈旧锁
+    }
+  };
+  process.on('exit', release);
+  process.on('SIGINT', () => { release(); process.exit(0); });
+  process.on('SIGTERM', () => { release(); process.exit(0); });
+  return true;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -24,8 +73,179 @@ function normalizeText(text) {
   return String(text || '').trim().toLowerCase();
 }
 
-function hasDeepSeekConfig() {
-  return Boolean(process.env.DEEPSEEK_API_KEY);
+// 启动时从 getMe 填入，用于群组里识别 @ 提及
+let BOT_USERNAME = '';
+
+// 每个 chat 的最近对话上下文（内存态，重启清空），最多保留 10 条
+const conversations = new Map();
+const MAX_CONTEXT_MESSAGES = 10;
+
+// 主人设由 .env 的 HERMES_PERSONA 控制（含「始终用英文回复」）；下面只是兜底默认值。
+// 代码仅追加私聊/群组的上下文差异（私聊可称呼 Sarah；群组不称呼任何人）。
+const DEFAULT_PERSONA = [
+  'You are Hermes, a competitor-price analyst on the team for a Shopee Malaysia phone retailer (D3).',
+  'ALWAYS reply in English, no matter what language the user writes in (Chinese, English, Malay, etc.).',
+  'Talk like a sharp, friendly teammate — natural and concise, good for Telegram (usually 1-4 sentences).',
+  'You are given a LIVE CONTEXT block below with real monitoring data (sweep status, recent changes, price competition). Answer from it directly and confidently. NEVER say you have no live data when context is provided.',
+  'Only suggest a slash command (/run to scrape now, /status, /changes, /watchlist) when the user clearly wants an action you cannot perform yourself, or when you genuinely cannot understand them. Do NOT default to telling people to run commands.',
+  'Never invent specific prices or numbers that are not in the context; if a specific figure is missing, say what you do know and offer to check.',
+  'Never address anyone as "master", "boss", or any servile term.',
+].join(' ');
+
+function buildPersona(isGroup) {
+  const base = (process.env.HERMES_PERSONA || '').trim() || DEFAULT_PERSONA;
+  const context = isGroup
+    ? 'This is a group chat: do not address anyone and do not use any personal name; stay neutral and to the point.'
+    : 'This is a private 1:1 chat: you may naturally address the user as Sarah (no need to do so in every message).';
+  return `${base} ${context}`;
+}
+
+function isGroupChat(message) {
+  const type = message?.chat?.type;
+  return type === 'group' || type === 'supergroup';
+}
+
+// 群组里只有 @ 了 bot、或回复 bot 的消息才响应；返回是否被点名 + 去掉 @ 后的文本
+function resolveGroupMessage(message) {
+  const text = message.text || '';
+  let addressed = false;
+
+  const replyUser = message.reply_to_message?.from?.username;
+  if (replyUser && BOT_USERNAME && replyUser.toLowerCase() === BOT_USERNAME.toLowerCase()) {
+    addressed = true;
+  }
+
+  if (BOT_USERNAME) {
+    const mention = `@${BOT_USERNAME}`.toLowerCase();
+    if (text.toLowerCase().includes(mention)) addressed = true;
+  }
+
+  const cleaned = BOT_USERNAME
+    ? text.replace(new RegExp(`@${BOT_USERNAME}`, 'ig'), '').trim()
+    : text.trim();
+
+  return { addressed, text: cleaned };
+}
+
+function capLength(text, max = 1500) {
+  const value = String(text || '');
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
+// 按已配置的 key 选择聊天用的 AI provider；AI_PROVIDER 可显式指定
+function pickAiProvider() {
+  const explicit = String(process.env.AI_PROVIDER || '').trim().toLowerCase();
+  const has = {
+    deepseek: Boolean(process.env.DEEPSEEK_API_KEY),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+  };
+  if (explicit === 'claude') return has.anthropic ? 'anthropic' : null;
+  if (explicit && has[explicit]) return explicit;
+  if (has.deepseek) return 'deepseek';
+  if (has.openai) return 'openai';
+  if (has.anthropic) return 'anthropic';
+  return null;
+}
+
+// DeepSeek 和 OpenAI 都是 OpenAI 兼容的 /chat/completions
+async function callOpenAICompatible(provider, messages, system) {
+  const isDeepSeek = provider === 'deepseek';
+  const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
+  const url = isDeepSeek
+    ? 'https://api.deepseek.com/chat/completions'
+    : 'https://api.openai.com/v1/chat/completions';
+  const model = isDeepSeek
+    ? process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+    : process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.7,
+      max_tokens: 600,
+      messages: [{ role: 'system', content: system }, ...messages],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`${provider} ${response.status}: ${await response.text()}`);
+  }
+  const payload = await response.json();
+  return payload?.choices?.[0]?.message?.content || '';
+}
+
+// Anthropic Messages API（Opus 4.8：不传 temperature/top_p，否则 400）
+async function callAnthropic(messages, system) {
+  const model = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 600,
+      system,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`anthropic ${response.status}: ${await response.text()}`);
+  }
+  const payload = await response.json();
+  return Array.isArray(payload?.content)
+    ? payload.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
+    : '';
+}
+
+// 给 AI 注入的实时上下文：sweep 状态 + 变价 + 价格竞争（都是现成数据，失败的部分跳过）
+async function buildAiContext() {
+  const parts = [];
+  try { parts.push(`SWEEP STATUS:\n${buildStatusMessage()}`); } catch { /* 跳过 */ }
+  try { parts.push(`RECENT CHANGES:\n${buildChangesMessage()}`); } catch { /* 跳过 */ }
+  try { parts.push(`PRICE COMPETITION:\n${await buildMarketContext()}`); } catch { /* 跳过 */ }
+  return parts.join('\n\n');
+}
+
+async function chatWithAI(chatId, userText, isGroup = false) {
+  const provider = pickAiProvider();
+  if (!provider) {
+    // 仅在完全没配 AI key 时出现；配上 DEEPSEEK_API_KEY 即进入真正的 AI 助理模式
+    return 'AI chat is not switched on yet (no DEEPSEEK_API_KEY set). Once it is, just ask me things like "which competitor is most aggressive" and I will answer from live data.';
+  }
+
+  const context = await buildAiContext();
+  const system = context
+    ? `${buildPersona(isGroup)}\n\nLIVE CONTEXT (real data from the monitor, captured just now — use it, do not invent beyond it):\n${context}`
+    : buildPersona(isGroup);
+  const history = conversations.get(chatId) || [];
+  const messages = [...history, { role: 'user', content: userText }];
+
+  try {
+    let reply = provider === 'anthropic'
+      ? await callAnthropic(messages, system)
+      : await callOpenAICompatible(provider, messages, system);
+    reply = capLength(String(reply || '').trim()) || '嗯，我在的，你想问什么？';
+
+    // 记住最近 MAX_CONTEXT_MESSAGES 条上下文
+    const next = [...messages, { role: 'assistant', content: reply }];
+    conversations.set(chatId, next.slice(-MAX_CONTEXT_MESSAGES));
+    return reply;
+  } catch (error) {
+    logHermes(`AI 聊天失败：${error.message || String(error)}`);
+    console.error('AI 聊天失败：', error);
+    return '抱歉，我刚走神了一下，你能再说一次吗？';
+  }
 }
 
 function parseAddCommand(text) {
@@ -41,30 +261,6 @@ function parseAddCommand(text) {
   const competitor = raw.replace(urlMatch[0], '').replace(/^\/?add\s+/i, '').trim();
   if (!competitor) return null;
   return { competitor, product_url: productUrl };
-}
-
-function normalizeAction(action) {
-  const value = String(action || '').trim().toLowerCase();
-  const alias = {
-    check: 'run',
-    run_now: 'run',
-    run_check: 'run',
-    price_check: 'run',
-    latest_changes: 'changes',
-    change: 'changes',
-    recent_changes: 'changes',
-    list: 'watchlist',
-    monitored: 'watchlist',
-    explain_status: 'status_help',
-    explain_changes: 'changes_help',
-    explain_watchlist: 'watchlist_help',
-    explain_run: 'run_help',
-    faq_status: 'status_help',
-    faq_changes: 'changes_help',
-    faq_watchlist: 'watchlist_help',
-    faq_run: 'run_help',
-  };
-  return alias[value] || value;
 }
 
 function buildExplainMessage(kind) {
@@ -154,154 +350,54 @@ async function executeAction(chatId, action, rawText, directReply = '') {
   );
 }
 
-async function classifyWithDeepSeek(text) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-
-  const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      thinking: { type: 'disabled' },
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: [
-            '你是 Hermes，一位给 Sarah 使用的 Shopee 价格监控助理。',
-            '你的语气要像简洁的个人秘书，直接、自然、少废话，不要像机器人菜单。',
-            '你负责先理解用户的人话，再把它映射成受限动作，不能编造系统状态。',
-            '允许动作：status, changes, watchlist, run, add, help, status_help, changes_help, watchlist_help, run_help, reply, unknown。',
-            '当用户是想新增监控商品时，用 add；当用户是在问命令是什么意思时，用对应 *_help。',
-            '如果用户只是闲聊或问不在系统能力范围内的事，用 reply，并用助理口吻简短回答，再轻轻引导到你能做的事。',
-            '如果用户问“你现在在做什么”“你可以做什么”“我的S26价格是多少”这类问题，优先给自然回答，不要上来就贴命令菜单。',
-            '如果用户问单个型号当前价格，但系统里没有单独查询动作，就用 reply 简短说明你目前能查最近变价、监控名单或立刻跑检查。',
-            '必须返回 JSON：{"action":"...", "reply":"...", "competitor":"", "product_url":""}。',
-            '只有 action=add 时才填写 competitor 和 product_url。',
-          ].join(' '),
-        },
-        {
-          role: 'user',
-          content: text,
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`DeepSeek ${response.status}: ${body}`);
-  }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  if (!content) return null;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return null;
-  }
-
-  return {
-    action: normalizeAction(parsed.action),
-    reply: String(parsed.reply || '').trim(),
-    competitor: String(parsed.competitor || '').trim(),
-    product_url: String(parsed.product_url || '').trim(),
-  };
-}
-
+// 收紧路由：只有斜杠命令 / 近乎纯关键词 / 明确动作(run、加链接) 才走命令；
+// 自然语言问题一律落到 AI Chat Mode（带实时上下文）。避免 "价格/status/检查" 等词被贪婪截走。
 function classifyByRules(text) {
   const normalized = normalizeText(text);
-  if (!normalized || normalized === '/start' || normalized === '/help' || normalized === 'help') {
-    return { action: 'help' };
-  }
+  if (!normalized) return { action: 'unknown' };
 
-  if (normalized === '/resume' || normalized === 'resume' || normalized === '继续') {
-    return { action: 'resume' };
-  }
-  if (normalized === '/abort' || normalized === 'abort' || normalized === '跳过') {
-    return { action: 'abort' };
-  }
+  // 命令含义解释（先于纯关键词，"status什么意思" 不应被当 /status）
+  if (normalized.includes('status') && (normalized.includes('什么意思') || normalized.includes('meaning'))) return { action: 'status_help' };
+  if (normalized.includes('changes') && normalized.includes('什么意思')) return { action: 'changes_help' };
+  if (normalized.includes('watchlist') && normalized.includes('什么意思')) return { action: 'watchlist_help' };
+  if (normalized.includes('run') && normalized.includes('什么意思')) return { action: 'run_help' };
 
-  if (normalized.startsWith('/add') || (normalized.includes('add') && normalized.includes('http'))) {
-    return { action: 'add' };
-  }
+  if (normalized === '/start' || normalized === '/help' || normalized === 'help' || normalized === '帮助') return { action: 'help' };
+  if (normalized === '/resume' || normalized === 'resume' || normalized === '继续') return { action: 'resume' };
+  if (normalized === '/abort' || normalized === 'abort' || normalized === '跳过') return { action: 'abort' };
 
-  if (normalized === '/status' || normalized.includes('status') || normalized.includes('状态')) {
-    return { action: 'status' };
-  }
+  // 动作：新增监控（带链接才算）
+  if (normalized.startsWith('/add') || (normalized.includes('add') && normalized.includes('http'))) return { action: 'add' };
 
-  if (
-    normalized.includes('status什么意思') ||
-    normalized.includes('status 是什么意思') ||
-    normalized.includes('status meaning')
-  ) {
-    return { action: 'status_help' };
-  }
+  // 斜杠命令 / 近乎纯关键词（精确匹配，自然语言不再误触）
+  if (normalized === '/status' || normalized === 'status' || normalized === '状态') return { action: 'status' };
+  if (normalized === '/changes' || normalized === 'changes' || normalized === '变价') return { action: 'changes' };
+  if (normalized === '/watchlist' || normalized === 'watchlist' || normalized === '监控名单' || normalized === '名单') return { action: 'watchlist' };
 
-  if (normalized === '/changes' || normalized.includes('change') || normalized.includes('变价') || normalized.includes('价格')) {
-    return { action: 'changes' };
-  }
-
-  if (normalized.includes('changes什么意思') || normalized.includes('changes 是什么意思')) {
-    return { action: 'changes_help' };
-  }
-
-  if (normalized === '/watchlist' || normalized.includes('watchlist') || normalized.includes('监控') || normalized.includes('名单')) {
-    return { action: 'watchlist' };
-  }
-
-  if (normalized.includes('watchlist什么意思') || normalized.includes('watchlist 是什么意思')) {
-    return { action: 'watchlist_help' };
-  }
-
-  if (normalized === '/run' || normalized.includes('run') || normalized.includes('检查') || normalized.includes('现在抓')) {
+  // 动作：立即抓取（斜杠或明确祈使句）
+  if (normalized === '/run' || normalized === 'run' || /^(跑一轮|跑价|跑一下|立即(检查|抓)|现在(抓|跑|检查)一?(轮|下)?|run\s*now)$/.test(normalized)) {
     return { action: 'run' };
-  }
-
-  if (normalized.includes('run什么意思') || normalized.includes('run 是什么意思')) {
-    return { action: 'run_help' };
   }
 
   return { action: 'unknown' };
 }
 
-async function handleText(chatId, text) {
+async function handleText(chatId, text, isGroup = false) {
+  // 价格查询：先于命令与 AI。数字只来自 /api/records，找不到就说找不到，绝不让 AI 猜。
+  if (isPriceQuery(text)) {
+    const reply = await handlePriceQuery(text);
+    return sendTelegramReply(chatId, reply);
+  }
+
+  // 模式 1：命令（含中英文关键词）——保持原有功能不变
   const ruleIntent = classifyByRules(text);
   if (ruleIntent.action !== 'unknown') {
     return executeAction(chatId, ruleIntent.action, text, ruleIntent.reply || '');
   }
 
-  if (hasDeepSeekConfig()) {
-    try {
-      const aiIntent = await classifyWithDeepSeek(text);
-      if (aiIntent?.action === 'add' && aiIntent.product_url && aiIntent.competitor) {
-        return executeAction(
-          chatId,
-          'add',
-          `/add ${aiIntent.competitor} ${aiIntent.product_url}`,
-          aiIntent.reply || ''
-        );
-      }
-      if (aiIntent?.action) {
-        return executeAction(chatId, aiIntent.action, text, aiIntent.reply || '');
-      }
-    } catch (error) {
-      const message = `DeepSeek 意图识别失败：${error.message || String(error)}`;
-      console.error(message);
-      logHermes(message);
-    }
-  }
-
-  return executeAction(chatId, 'unknown', text, '');
+  // 模式 2：非命令 → 自然语言聊天，交给 AI 生成回复（群组人设不称呼任何人）
+  const reply = await chatWithAI(chatId, text, isGroup);
+  return sendTelegramReply(chatId, reply);
 }
 
 async function pollLoop() {
@@ -310,11 +406,26 @@ async function pollLoop() {
     const message = 'Telegram bot 未启动：缺少 TELEGRAM_BOT_TOKEN';
     console.error(message);
     logHermes(message);
-    return;
+    process.exit(2); // 配置缺失：bat 不应重启
+  }
+  if (!acquireSingleInstanceLock()) {
+    const message = '检测到已有 Telegram bot 实例在运行（单实例锁），本次退出，避免 409 Conflict。';
+    console.error(message);
+    logHermes(message);
+    process.exit(3); // 已有实例：bat 不应重启
   }
   let offset = readTelegramOffset();
+
+  // 取 bot 用户名，群组里用来识别 @ 提及
+  try {
+    const me = await telegramApi('getMe');
+    BOT_USERNAME = me?.result?.username || '';
+  } catch (error) {
+    logHermes(`getMe 失败（不影响私聊）：${error.message || String(error)}`);
+  }
+
   logHermes('Telegram bot 启动');
-  console.log('Telegram bot 已启动');
+  console.log(`Telegram bot 已启动${BOT_USERNAME ? `（@${BOT_USERNAME}）` : ''}`);
 
   while (true) {
     try {
@@ -326,7 +437,15 @@ async function pollLoop() {
 
         const message = update.message;
         if (!message?.chat?.id) continue;
-        await handleText(message.chat.id, message.text || '');
+
+        // 私聊：命令 + 自然语言都响应；群组：只响应 @ 了 bot（或回复 bot）的消息
+        if (isGroupChat(message)) {
+          const { addressed, text } = resolveGroupMessage(message);
+          if (!addressed) continue;
+          await handleText(message.chat.id, text, true);
+        } else {
+          await handleText(message.chat.id, message.text || '', false);
+        }
       }
     } catch (error) {
       const message = `Telegram bot 轮询失败：${error.message || String(error)}`;
