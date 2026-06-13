@@ -516,13 +516,46 @@ function renderMultipleMatches(rows) {
   return `Found multiple matches, please specify:\n${names.map((n) => `• ${n}`).join('\n')}`;
 }
 
+// Phase B：把多型号 take-back 句子拆成型号段（逗号 / 、 / 换行 / 斜杠 / 和 / and 分隔）。
+// 返回"看起来像型号"的段（含存储或型号 token）；少于 2 段则不算多型号。
+function splitModelSegments(text) {
+  let t = String(text || '');
+  t = t.replace(/take\s*back|takeback|拿回第一|怎样拿回/ig, ' '); // 去 take back 触发词
+  t = t.replace(/[,，、/／]|\n|和|\band\b/ig, '\n');               // 统一分隔符 → 换行
+  return t.split('\n')
+    .map((s) => s.trim())
+    .filter((s) => /\d+\s*(gb|tb)\b/i.test(s) || /\b([as]\s?\d{1,2}|z\s?(fold|flip)|fold|flip|tab)\b/i.test(s));
+}
+
+// 多型号 take-back：逐段独立 lookup（复用 comboMatchesTokens 的限定词相等规则），合并成列表。
+function handleMultiTakeBack(segments, combos, cspMap) {
+  const lines = ['Take Back results:', ''];
+  for (const seg of segments) {
+    const tokens = queryTokens(seg);
+    const matched = [...combos.values()]
+      .filter((c) => comboMatchesTokens(c, tokens))
+      .sort((a, b) => `${a.model} ${a.capacity}`.localeCompare(`${b.model} ${b.capacity}`, undefined, { numeric: true }));
+    if (matched.length === 0) {
+      lines.push(`• ${seg}: not found`);
+    } else {
+      for (const c of matched) {
+        lines.push(`• ${c.model} ${c.capacity}: ${fmtTakeBack(takeBackOf(cspMap, c.model, c.capacity))}`);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
 // ── 处理器 ───────────────────────────────────────────────────────────────────
 async function handleTakeBack(text) {
   const onlyComp = detectCompetitor(text);
-  const scope = parseScope(stripCompetitorNames(text));
   const [records, cspMap] = await Promise.all([fetchRecords(), fetchCsp()]);
   const shopMap = buildShopMap();
   const combos = buildCombos(records, shopMap);
+  // Phase B：拆出 2+ 型号段 → 逐个 lookup，不再压成单个 AND 查询。
+  const segments = splitModelSegments(stripCompetitorNames(text));
+  if (segments.length >= 2) return handleMultiTakeBack(segments, combos, cspMap);
+  const scope = parseScope(stripCompetitorNames(text));
   const rows = selectRows(combos, scope, onlyComp);
   if (rows.length === 0) {
     return (scope.kind === 'single' || scope.kind === 'model')
