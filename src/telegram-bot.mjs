@@ -16,7 +16,7 @@ import {
 } from './lib-hermes.mjs';
 import { runOnce } from './runOnce.mjs';
 import { writeManualSignal } from './recovery/TelegramNotifier.mjs';
-import { isPriceQuery, handlePriceQuery, buildMarketContext } from './price-lookup.mjs';
+import { isPriceQuery, handlePriceQuery, isPriceLookupMiss, buildMarketContext } from './price-lookup.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -400,10 +400,13 @@ function classifyByRules(text) {
 }
 
 async function handleText(chatId, text, isGroup = false) {
-  // 价格查询：先于命令与 AI。数字只来自 /api/records，找不到就说找不到，绝不让 AI 猜。
+  // 价格查询：先于命令与 AI。数字只来自 /api/records。
   if (isPriceQuery(text)) {
     const reply = await handlePriceQuery(text);
-    return sendTelegramReply(chatId, reply);
+    if (!isPriceLookupMiss(reply)) return sendTelegramReply(chatId, reply);
+    // 0 命中（解析不到型号）→ 不直接死掉，直接 fallback 到 AI（可解释找不到 / 回答公式 / 多型号）。
+    const aiReply = await chatWithAI(chatId, text, isGroup);
+    return sendTelegramReply(chatId, aiReply);
   }
 
   // 模式 1：命令（含中英文关键词）——保持原有功能不变

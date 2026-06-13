@@ -149,6 +149,7 @@ function queryTokens(text) {
     // 知识问句词（避免污染型号匹配；这些句子本应被知识护栏路由到 AI）
     'FORMULA', 'CALCULATION', 'CALCULATE', 'CALCULATED', 'CALCULATES', 'EXPLAIN', 'MEAN', 'MEANS',
     'MEANING', 'WHY', 'DOES', 'DO', 'ARE', 'DEFINE', 'DEFINITION', 'WORK', 'WORKS',
+    'CCB', 'COMMISSION', 'ADS', 'SST', 'CREDIT', 'COUNT',
   ]);
   return ` ${t} `
     .replace(/[^A-Z0-9]/g, ' ') // 此时 "+" 已转 PLUS，无需保留
@@ -437,10 +438,13 @@ function isSingleStorageQuery(text) {
   return model || priceWord;
 }
 
-// 知识/定义问句词：问"是什么/怎么算/为什么/formula"等
-const KNOWLEDGE_RE = /\bwhat\s+is\b|\bwhat\s+does\b|\bwhat'?s\b|\bhow\s+(?:is|are|do|does|did)\b|\bwhy\b|\bexplain\b|\bmeans?\b|\bmeaning\b|\bformula\b|\bcalculat(?:e|ed|es|ion|ing)\b|\bdefine\b|\bdefinition\b|\bhow\s+does\b|是什么|怎么算|怎样算|如何算|为什么|为何|解释|什么意思/i;
+// 强解释信号：公式/计算/扣费机制/CCB/Commission/Ads/SST/why —— 即使带型号+容量也走 AI 解释
+const EXPLAIN_RE = /\bformula\b|公式|\bexplain\b|解释|\bcalculat(?:e|ed|es|ion|ing)\b|\bhow\s+to\s+(?:count|calculat)|\bhow\s+(?:is|are|do|does|did)\b[\w\s]*?(?:calculat|count|work|deriv)|怎么算|怎样算|如何算|怎么扣|怎样扣|扣费|扣多少|\bccb\b|\bcommission\b|\bads\s*credit\b|\bads\b|\bsst\b|\bwhy\b|为什么|为何|\bmeans?\b|\bmeaning\b|\bdefine\b|\bdefinition\b|什么意思/i;
 
-// 是否明确给了型号 + 容量（给了就算真查询，不当知识问句拦）
+// 弱疑问信号：what is / how is —— 仅在【没给型号+容量】时才当知识问句（避免误拦 "what is the price of S26 256GB"）
+const WEAK_KNOWLEDGE_RE = /\bwhat\s+is\b|\bwhat\s+does\b|\bwhat'?s\b|\bhow\s+(?:is|are|do|does|did)\b|是什么/i;
+
+// 是否明确给了型号 + 容量
 function hasModelAndCapacity(text) {
   const toks = queryTokens(text);
   const hasCap = toks.some((t) => /^\d+(GB|TB)$/.test(t));
@@ -448,16 +452,26 @@ function hasModelAndCapacity(text) {
   return hasCap && hasModel;
 }
 
-// 知识问句护栏（P1）：问定义/公式/原理且没给具体型号+容量 → 不进 Price Engine，落 AI Chat
+// 知识问句护栏：强解释词 → 一律 AI（含带型号+容量的 "S26 256GB takeback formula"）；
+// 弱疑问词 → 仅在无型号+容量时当知识问句。
 function isKnowledgeQuestion(text) {
-  if (!KNOWLEDGE_RE.test(String(text || ''))) return false;
-  return !hasModelAndCapacity(text);
+  const t = String(text || '');
+  if (EXPLAIN_RE.test(t)) return true;
+  if (WEAK_KNOWLEDGE_RE.test(t)) return !hasModelAndCapacity(t);
+  return false;
 }
 
 // 价格/分析意图总闸：命中任一即走 /api/records 数据逻辑，绝不进 AI 聊天
 export function isPriceQuery(text) {
-  if (isKnowledgeQuestion(text)) return false; // 知识问句优先放行给 AI Chat
+  if (isKnowledgeQuestion(text)) return false; // 知识/解释问句优先放行给 AI Chat
   return isWhatIfQuery(text) || isTakeBackQuery(text) || isSeriesQuery(text) || isSingleStorageQuery(text);
+}
+
+// price lookup「找不到型号」的判定 —— 供 telegram-bot 在 0 命中时 fallback 到 AI（不直接死掉）。
+// 只认真正的"解析不到型号"，不含 multiple-matches 提示 / "No models are currently undercut"（那些是有效回复）。
+const PRICE_MISS_RE = /^Couldn't find |^No models found for |^No models to simulate for /;
+export function isPriceLookupMiss(reply) {
+  return PRICE_MISS_RE.test(String(reply || ''));
 }
 
 // ── 渲染 ─────────────────────────────────────────────────────────────────────
