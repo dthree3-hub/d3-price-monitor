@@ -208,6 +208,22 @@ async function callAnthropic(messages, system) {
     : '';
 }
 
+// Take Back 业务知识（写进 system prompt，让 AI 能解释定义/公式；Hermes 不自己硬算）
+// 公式与 Google Sheet「Samsung」tab 实际单元格公式一致（H列=Take back (S)）。
+const BUSINESS_KNOWLEDGE = [
+  'TAKE BACK — definition (use this when a user asks what take back is, how it is calculated, why it differs, or its formula):',
+  'Take Back = the value in the Google Sheet column "Take back (S)". It is a trade-in / buy-back figure, NOT a price-drop action.',
+  'Formula (matches the Sheet exactly, for EXPLANATION only): Take Back (S) = CSP − (CSP × Shopee Commission) − CCB − Ads Credit, where:',
+  'CSP = Current Selling Price (Sheet column B).',
+  'Shopee Commission = CSP × the per-model rate in Sheet column C — it VARIES by model (e.g. ~10.26% for A06 5G); it is NOT a fixed 5.5%.',
+  'CCB (Coin Cashback) = the column the Sheet labels "CCB 5.5%", but its actual formula is CSP × 0.0594; the "7.5%" variant is CSP × 0.081.',
+  'Ads Credit = the column labelled "Ads Credit 3%", but its actual formula is CSP × 0.0216 or CSP × 0.0324 depending on the model (per Sheet column G).',
+  'Note: these effective rates look like the nominal rate plus 8% SST (e.g. 5.5% × 1.08 = 5.94% = 0.0594, 3% × 1.08 = 0.0324). So the header labels (5.5% / 7.5% / 3%) are nominal; the real deduction rates are the ×1.08 figures above.',
+  'Worked example (A06 5G, verified against the Sheet): CSP = RM584, Commission rate = 0.1026, CCB = 584 × 0.0594 = RM34.69, Ads = 584 × 0.0216 = RM12.61 → Take Back = 584 − (584 × 0.1026) − 34.69 − 12.61 = RM476.78.',
+  'IMPORTANT: the actual number Hermes shows is ALWAYS the Google Sheet column "Take back (S)" (read via /api/csp). Hermes only reads that final value — it never recomputes or overrides the Sheet result. Use the formula to explain the logic, not to produce the displayed figure.',
+  'When a user asks for a specific model, e.g. "take back S26 256GB", that is a data lookup that returns the Sheet value; do not compute or guess a number.',
+].join(' ');
+
 // 给 AI 注入的实时上下文：sweep 状态 + 变价 + 价格竞争（都是现成数据，失败的部分跳过）
 async function buildAiContext() {
   const parts = [];
@@ -225,9 +241,10 @@ async function chatWithAI(chatId, userText, isGroup = false) {
   }
 
   const context = await buildAiContext();
+  const base = `${buildPersona(isGroup)}\n\n${BUSINESS_KNOWLEDGE}`;
   const system = context
-    ? `${buildPersona(isGroup)}\n\nLIVE CONTEXT (real data from the monitor, captured just now — use it, do not invent beyond it):\n${context}`
-    : buildPersona(isGroup);
+    ? `${base}\n\nLIVE CONTEXT (real data from the monitor, captured just now — use it, do not invent beyond it):\n${context}`
+    : base;
   const history = conversations.get(chatId) || [];
   const messages = [...history, { role: 'user', content: userText }];
 

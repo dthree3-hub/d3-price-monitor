@@ -142,10 +142,13 @@ function queryTokens(text) {
     'CURRENT', 'PLEASE', 'GIVE', 'SHOW', 'D3', 'SHOPEE', 'SAMSUNG', 'GALAXY', 'RM',
     'COST', 'BERAPA', 'HARGA', 'NOW', 'YOUR', 'OUR',
     // Intent Layer 指令词：take back / series / what-if，剔除后型号匹配才干净
-    'TAKE', 'BACK', 'NEED', 'NEEDS', 'NEEDED', 'SERIES', 'ALL', 'EVERYTHING', 'UNDERCUT',
+    'TAKE', 'BACK', 'TAKEBACK', 'AND', 'NEED', 'NEEDS', 'NEEDED', 'SERIES', 'ALL', 'EVERYTHING', 'UNDERCUT',
     'CHEAPER', 'CHEAPEST', 'THAN', 'US', 'WE', 'LOWER', 'REDUCE', 'REDUCTION', 'CUT', 'DROP',
     'IF', 'BY', 'TO', 'WOULD', 'HAPPEN', 'AFTER', 'MODEL', 'MODELS', 'WHICH', 'WHO', 'WHOSE',
     'CHECK', 'STILL', 'BEAT', 'BEATS',
+    // 知识问句词（避免污染型号匹配；这些句子本应被知识护栏路由到 AI）
+    'FORMULA', 'CALCULATION', 'CALCULATE', 'CALCULATED', 'CALCULATES', 'EXPLAIN', 'MEAN', 'MEANS',
+    'MEANING', 'WHY', 'DOES', 'DO', 'ARE', 'DEFINE', 'DEFINITION', 'WORK', 'WORKS',
   ]);
   return ` ${t} `
     .replace(/[^A-Z0-9]/g, ' ') // 此时 "+" 已转 PLUS，无需保留
@@ -375,11 +378,17 @@ function parseScope(text) {
   const nonStorage = tokens.filter((t) => !/^\d+(GB|TB)$/.test(t));
   const base = seriesTokenOf(tokens.join(' ')); // 只认 [AS]\d / Fold / Flip / Tab
   const wantsSeries = /series|系列/i.test(text);
-  if (hasStorage && nonStorage.length > 0 && !wantsSeries) {
+  // 显式 "X series" → 整系列
+  if (wantsSeries && base) {
+    return { kind: 'series', base, label: `${base} series` };
+  }
+  // 有容量 + 型号 token → 单一型号+容量
+  if (hasStorage && nonStorage.length > 0) {
     return { kind: 'single', tokens, label: tokens.join(' ') };
   }
-  if (base && (wantsSeries || !hasStorage)) {
-    return { kind: 'series', base, label: `${base} series` };
+  // 无容量但有型号 token（含限定词 plus/FE/ultra）→ model scope，保留限定词、列该型号各容量（P2）
+  if (base && nonStorage.length > 0) {
+    return { kind: 'model', tokens, label: tokens.join(' ') };
   }
   return { kind: 'all', label: 'all models' };
 }
@@ -428,8 +437,26 @@ function isSingleStorageQuery(text) {
   return model || priceWord;
 }
 
+// 知识/定义问句词：问"是什么/怎么算/为什么/formula"等
+const KNOWLEDGE_RE = /\bwhat\s+is\b|\bwhat\s+does\b|\bwhat'?s\b|\bhow\s+(?:is|are|do|does|did)\b|\bwhy\b|\bexplain\b|\bmeans?\b|\bmeaning\b|\bformula\b|\bcalculat(?:e|ed|es|ion|ing)\b|\bdefine\b|\bdefinition\b|\bhow\s+does\b|是什么|怎么算|怎样算|如何算|为什么|为何|解释|什么意思/i;
+
+// 是否明确给了型号 + 容量（给了就算真查询，不当知识问句拦）
+function hasModelAndCapacity(text) {
+  const toks = queryTokens(text);
+  const hasCap = toks.some((t) => /^\d+(GB|TB)$/.test(t));
+  const hasModel = toks.some((t) => /^[AS]\d{1,2}$/.test(t)) || /\b(fold|flip|tab)\b/i.test(text);
+  return hasCap && hasModel;
+}
+
+// 知识问句护栏（P1）：问定义/公式/原理且没给具体型号+容量 → 不进 Price Engine，落 AI Chat
+function isKnowledgeQuestion(text) {
+  if (!KNOWLEDGE_RE.test(String(text || ''))) return false;
+  return !hasModelAndCapacity(text);
+}
+
 // 价格/分析意图总闸：命中任一即走 /api/records 数据逻辑，绝不进 AI 聊天
 export function isPriceQuery(text) {
+  if (isKnowledgeQuestion(text)) return false; // 知识问句优先放行给 AI Chat
   return isWhatIfQuery(text) || isTakeBackQuery(text) || isSeriesQuery(text) || isSingleStorageQuery(text);
 }
 
@@ -447,27 +474,32 @@ function renderTakeBackSingle(r, tb) {
   return lines.join('\n');
 }
 
-// 列表（series / all / 指定竞品）：只列被竞品压价的型号（Q2）。
-function renderTakeBackList(rows, label, onlyComp, cspMap) {
-  const undercut = rows
-    .filter((r) => r.diff != null && r.diff < -0.005)
-    .sort((a, b) => a.diff - b.diff);
-  if (undercut.length === 0) return 'No models are currently undercut by competitors.';
-  const lines = [];
-  for (const r of undercut) {
-    const tb = takeBackOf(cspMap, r.model, r.capacity);
-    lines.push(`${r.model} ${r.capacity}`);
-    lines.push('');
-    lines.push('Pricing Status:');
-    lines.push(pricingStatus(r.our, r.compName, r.compPrice));
-    lines.push('');
-    lines.push('Take Back:');
-    lines.push(fmtTakeBack(tb));
-    lines.push('');
-    lines.push('—'.repeat(6));
+// 一条型号的完整段落（model 列表 / 被压价列表共用）
+function takeBackBlock(r, cspMap) {
+  const tb = takeBackOf(cspMap, r.model, r.capacity);
+  return [
+    `${r.model} ${r.capacity}`, '',
+    'Pricing Status:', pricingStatus(r.our, r.compName, r.compPrice), '',
+    'Take Back:', fmtTakeBack(tb),
+  ].join('\n');
+}
+
+// 多型号列表；undercutOnly=true → 只列被竞品压价（series/all）；false → 列全部（model 各容量）
+function renderTakeBackMulti(rows, cspMap, undercutOnly) {
+  let list = rows;
+  if (undercutOnly) {
+    list = rows.filter((r) => r.diff != null && r.diff < -0.005).sort((a, b) => a.diff - b.diff);
+    if (list.length === 0) return 'No models are currently undercut by competitors.';
+  } else {
+    list = [...rows].sort(sortByKey);
   }
-  lines.pop(); // 去掉最后一个分隔
-  return lines.join('\n');
+  return list.map((r) => takeBackBlock(r, cspMap)).join(`\n\n${'—'.repeat(6)}\n`);
+}
+
+// 多候选歧义提示（P3）：与价格查询一致，不静默取第一个
+function renderMultipleMatches(rows) {
+  const names = [...new Set(rows.map((r) => `${r.model} ${r.capacity}`))].sort();
+  return `Found multiple matches, please specify:\n${names.map((n) => `• ${n}`).join('\n')}`;
 }
 
 // ── 处理器 ───────────────────────────────────────────────────────────────────
@@ -479,15 +511,22 @@ async function handleTakeBack(text) {
   const combos = buildCombos(records, shopMap);
   const rows = selectRows(combos, scope, onlyComp);
   if (rows.length === 0) {
-    return scope.kind === 'single'
+    return (scope.kind === 'single' || scope.kind === 'model')
       ? `Couldn't find "${scope.label}" in current data. Try /watchlist to see what I track.`
       : `No models found for ${scope.label} in current data.`;
   }
+  // 单一型号+容量：唯一命中→完整卡；多命中(网络/连接歧义)→提示指定（P3）
   if (scope.kind === 'single') {
-    const r = rows[0];
-    return renderTakeBackSingle(r, takeBackOf(cspMap, r.model, r.capacity));
+    if (rows.length > 1) return renderMultipleMatches(rows);
+    return renderTakeBackSingle(rows[0], takeBackOf(cspMap, rows[0].model, rows[0].capacity));
   }
-  return renderTakeBackList(rows, scope.label, onlyComp, cspMap);
+  // 无容量带限定词(如 s26 plus)：列该型号各容量，不退化整系列、不只列被压价（P2）
+  if (scope.kind === 'model') {
+    if (rows.length === 1) return renderTakeBackSingle(rows[0], takeBackOf(cspMap, rows[0].model, rows[0].capacity));
+    return renderTakeBackMulti(rows, cspMap, false);
+  }
+  // series / all / 指定竞品：只列被压价
+  return renderTakeBackMulti(rows, cspMap, true);
 }
 
 async function handleSeries(text) {
