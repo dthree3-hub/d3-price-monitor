@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-06-15
+
+### Take Back 接入手表/Buds/Fit + 切到公司共享表
+- **文件**：`d3-worker/src/index.js`、`d3-worker/wrangler.toml`
+- **改了什么**：
+  - `parseSkuKey` 加 `WATCH/BUDS/FIT` 分支：去 `(L320)`/`(R410)` 代号 + 颜色/GIFT 尾巴；Watch→`Watch {num}[ Classic][ 44mm][ BT|LTE]`（Ultra→`Watch Ultra[ 年份]`），Buds/Fit→去代号后整串即 key。输出对齐 dashboard `variant.model`（scraper 已解析出 `Watch 8 40mm BT` 这种）。
+  - `wrangler.toml` `GOOGLE_SHEET_ID` 从旧副本 `1CWnB3...PITY` 切到**公司真正共享表**「Market Price List」`1sx6Q7...07xI`（手表只在公司表里）。手表数据在 Samsung tab 的 SMART WATCH/FIT 段（r91+），H 列 = Take back (S)。
+- **为什么**：旧 `parseSkuKey` 只认手机(RAM+存储)和平板(`^S1[01]`)，手表无 RAM+存储 → `return null` → 整行被丢，Take Back 一直显 `—`。
+- **业务决定（Leon 2026-06-15）**：① 切公司表（手机/平板 take back 数值随之变成公司表最新值）；② 同型号不同颜色 take back 不同时（如 Watch 8 Classic 黑/白）按 first-wins 取表上第一个（黑）；③ `WATCH ULTRA (L705)` 2024 款映射成 `Watch Ultra`，不补单独的 `Watch Ultra 2024` 行。
+- **验证**：`/api/csp` count 54→71，17 个手表/Buds/Fit key 全现、数值与表一致。
+- **commit**：见本次 · **Worker Version `f8038248`**（已部署）。
+- 注：index.js 同时带上之前未提交的「take back 行改对象 `{takeBack,csp,commission,ccb,ads}` + `toNum()`」（结构化 breakdown，早前已随部署上线）。
+
+---
+
 ## 2026-06-11
 
 ### 实测：不登录自动化被挡 → Chrome 默认改回登录 profile

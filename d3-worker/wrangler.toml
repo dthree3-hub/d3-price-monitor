@@ -5,7 +5,8 @@ compatibility_date = "2024-01-01"
 # Take Back ← Google Sheets（/api/csp）。GOOGLE_SERVICE_ACCOUNT_JSON 是 secret：
 #   cat <key>.json | npx wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON
 [vars]
-GOOGLE_SHEET_ID = "1CWnB3Nzpo7_Svw7zzJnOulDIuJwUlW7_DmZLtXoPITY"
+# 公司共享主表「Market Price List」(旧副本 1CWnB3...PITY 已弃用)
+GOOGLE_SHEET_ID = "1sx6Q7Oiu0H6HwWd9dTQNTrDcR6TWC6N9ca4AXsD07xI"
 GOOGLE_CSP_TAB = "Samsung"
 GOOGLE_CSP_RANGE = "Samsung!A2:H300"
 

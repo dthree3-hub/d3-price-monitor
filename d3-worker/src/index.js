@@ -84,11 +84,34 @@ async function getGoogleToken(saJson) {
   return j.access_token;
 }
 
-// A 列 "A06 6+128 5G (A066)" → "A06 5G 128GB"；无 RAM+存储(手表/buds/配件/标题) → null。
+// A 列 "A06 6+128 5G (A066)" → "A06 5G 128GB"；手表/Buds/Fit 见下方专门分支；其它(配件/标题) → null。
 // 前端再过 normalizeModelKey + toLowerCase 与 dashboard mk 匹配(大小写不敏感)。
 function parseSkuKey(a) {
   let s = String(a || '').trim();
   if (!s) return null;
+
+  // ── 手表 / Buds / Fit（无 RAM+存储；按 代号去除→尺寸/连接/Classic/年份 拼 key 对齐 dashboard）──
+  // 颜色不同 take back 不同时靠调用方 first-wins(取表上第一个)；GIFT/颜色尾巴落到同 key 被去重。
+  if (/^\s*(WATCH|BUDS|FIT)\b/i.test(s)) {
+    const x = s
+      .replace(/\([^)]*\)/g, ' ')                                                     // 去 (L320)/(R410) 代号
+      .replace(/\s*[-,]\s*(black|white|gray|grey|blue|silver|graphite|titanium|pink).*$/i, ' ') // 去颜色尾巴
+      .replace(/\s+gift\b.*$/i, ' ')                                                  // 去 GIFT/GIFT SET 尾巴
+      .replace(/\s+/g, ' ').trim();
+    if (/^WATCH/i.test(x)) {
+      if (/\bultra\b/i.test(x)) {                       // Watch Ultra [年份]
+        const year = (x.match(/\b(20\d\d)\b/) || [])[1] || '';
+        return `Watch Ultra${year ? ' ' + year : ''}`;
+      }
+      const num = (x.match(/watch\s*(\d+)/i) || [])[1];  // Watch 8 [Classic] [44mm] [BT|LTE]
+      if (!num) return null;
+      const classic = /\bclassic\b/i.test(x) ? ' Classic' : '';
+      const size = (x.match(/(\d{2})\s*mm/i) || [])[1];
+      const conn = /\bLTE\b/i.test(x) ? 'LTE' : (/\bBT\b/i.test(x) ? 'BT' : '');
+      return `Watch ${num}${classic}${size ? ` ${size}mm` : ''}${conn ? ` ${conn}` : ''}`;
+    }
+    return x || null;                                    // Buds 4 Pro / Buds Core / Fit 3：去代号后即 key
+  }
 
   // ── 平板 S10/S11（与手机不同：无 RAM+存储；可能带 "with KB"/键盘；无存储则默认 128GB）──
   // 仅产出 "S10 FE 256GB" 这种 model[ net] storage；前端 normalizeModelKey 会补 "Tab " 前缀、去 WiFi。
@@ -129,6 +152,16 @@ function toTakeBack(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// 通用数值解析：百分比 "10.26%"→0.1026、货币 "RM34.69"→34.69、空→null
+function toNum(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  const pct = s.includes('%');
+  const n = Number(s.replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  return pct ? n / 100 : n;
+}
+
 // 读 Sheet「Samsung」tab：A 列型号、H 列 Take back (S)。返回 { [parsedKey]: take_back }。
 async function fetchTakeBackRows(env) {
   if (!env.GOOGLE_SHEET_ID) throw new Error('missing GOOGLE_SHEET_ID');
@@ -145,7 +178,16 @@ async function fetchTakeBackRows(env) {
     const key = parseSkuKey(row[0]);   // A 列
     const tb = toTakeBack(row[7]);      // H 列 Take back (S)
     if (!key || tb == null) continue;
-    if (!(key in rows)) rows[key] = tb; // first-wins：表上方为准
+    if (key in rows) continue;          // first-wins：表上方为准
+    // rows[key] 由 number 改为 object（保留 H + 新增 B/C/E/G 供 structured breakdown）。
+    // 旧消费端（dashboard / Telegram）期望 number → 由消费端做 number|object 兼容（见 price-lookup takeBackOf）。
+    rows[key] = {
+      takeBack: tb,                     // H 列 Take back (S)
+      csp: toNum(row[1]),               // B 列 CSP
+      commissionRate: toNum(row[2]),    // C 列 Shopee Commission (S)，比例(0.1026)
+      ccb: toNum(row[4]),               // E 列 CCB 金额
+      ads: toNum(row[6]),               // G 列 Ads Credit 金额
+    };
   }
   return rows;
 }
