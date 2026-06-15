@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>D3 Price Console</title>
+    <title>D THREE — Price Console</title>
     <!-- Favicon / app icons (D logo) -->
     <link rel="icon" href="/favicon.ico?v=20260613" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260613">
@@ -43,6 +43,16 @@
         margin: 0 0 8px;
         font-size: 32px;
         line-height: 1.1;
+      }
+
+      .brand-logo {
+        display: block;
+        height: 46px;
+        width: auto;
+        max-width: 100%;
+        margin: 0 0 10px;
+        /* logo 是黑字白底 PNG：multiply 让白底乘成 hero 米色背景而隐形，黑字保留 */
+        mix-blend-mode: multiply;
       }
 
       p {
@@ -363,6 +373,10 @@
           font-size: 26px;
         }
 
+        .brand-logo {
+          height: 34px;
+        }
+
         .table-wrap {
           overflow-x: auto;
         }
@@ -399,7 +413,7 @@
 
     <main>
       <section class="hero">
-        <h1>D3 Price Console</h1>
+        <img class="brand-logo" src="logo-dthree.png" alt="D THREE" />
         <p>Drop in the JSON exported by the bookmarklet to monitor competitor phone variants in one place, then export a consolidated CSV for your internal system or Google Sheet.</p>
         <small>This page loads `/data/records.json` by default and also supports manual JSON imports. It does not access Shopee directly.</small>
       </section>
@@ -2551,6 +2565,7 @@ function escapeAttribute(value) {
   .cheaper{color:#9e3d2c;font-weight:800}
   .gap-up{color:#0f8b8d;font-weight:800}
   .gap-down{color:#b23a2b;font-weight:800}
+  .gap-lead{color:#1f8b3a;font-weight:800}
   .gap-flat{color:#735632;font-weight:700}
   .lowest{background:rgba(204,255,0,.85);border-radius:3px;padding:0 3px;box-decoration-break:clone;-webkit-box-decoration-break:clone;font-weight:700}
   .ourprice-input{width:64px;padding:6px 6px;border:1px solid var(--accent);border-radius:8px;text-align:right;font:inherit}
@@ -2801,6 +2816,8 @@ function escapeAttribute(value) {
     '56447030': 'D',
   };
   const activeRoles = ['A', 'B', 'C'];
+  // [Leon] 不监控的型号：整行从 Dashboard 隐藏（按 normalizeModelKey().toLowerCase() 比对）
+  const EXCLUDED_MODELS = new Set(['watch ultra 2024']);
   const TIER_ORDER = ['Basic', 'Promo', 'SET A'];
   const roleName = (role) => ROLE_NAMES[role] || role;
 
@@ -2836,6 +2853,7 @@ function escapeAttribute(value) {
         if (!ct) continue; // 只统计 Promo / Basic
         const mk = modelKeyOf(r.title, v, (window.D3_ITEM_MODEL || {})[String(r.itemId)]);
         if (!mk) continue;
+        if (EXCLUDED_MODELS.has(mk.toLowerCase())) continue; // [Leon] 跳过不监控型号(如 Watch Ultra 2024)
         if (!models.has(mk)) models.set(mk, {});
         if (!sources.has(mk)) sources.set(mk, []);
         const _srcArr = sources.get(mk);
@@ -2953,12 +2971,15 @@ function escapeAttribute(value) {
         }).join('');
         return `<td><div class="tier-stack">${rows}</div></td>`;
       }).join('');
+      // Gap = 最低竞品价(best，永不含 D3) − 我们的价。落后→红负数；领先→绿正数(领先市场多少)；持平→—。
       const diff = best && our != null ? best.price - our : null;
       const diffHtml = diff == null
         ? '—'
         : (diff < 0
           ? `<span class="gap-down">-RM${fmtMoney(Math.abs(diff))}</span>`
-          : '—');
+          : (diff > 0
+            ? `<span class="gap-lead">+RM${fmtMoney(diff)}</span>`
+            : '—'));
 
       // 我们的价：有自家数据就显示 Basic/Promo 两个价，否则给个填价框
       const st = selfTiers[mk];
@@ -3061,7 +3082,9 @@ function escapeAttribute(value) {
       const d = await r.json();
       if (d && d.ok && d.rows && typeof d.rows === 'object') {
         const map = {};
-        for (const [rawKey, tb] of Object.entries(d.rows)) {
+        for (const [rawKey, raw] of Object.entries(d.rows)) {
+          // /api/csp 兼容两种格式：旧=number(即 take back)；新=object{takeBack,csp,...}。看板只取 takeBack 数值。
+          const tb = (raw && typeof raw === 'object') ? raw.takeBack : raw;
           if (tb == null || tb === '') continue;
           map[normalizeModelKey(rawKey).toLowerCase()] = tb; // 与 dashboard mk 一致(大小写不敏感)
         }
