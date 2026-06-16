@@ -53,6 +53,7 @@ export const MODEL_CODES = {
   // ── 手表 / 手环（canonical 按 Leon 指定命名）──
   R390:     { canonical: 'Fit 3',                   family: 'Fit 3',           network: '',    capacities: [] },
   L705:     { canonical: 'Watch Ultra 2025',        family: 'Watch Ultra',     network: '',    capacities: [] },
+  L705N:    { canonical: 'Watch Ultra 2025',        family: 'Watch Ultra',     network: '',    capacities: [] },
   L7052025: { canonical: 'Watch Ultra 2025',        family: 'Watch Ultra',     network: '',    capacities: [] },
   L320:     { canonical: 'Watch 8 40mm BT',         family: 'Watch 8',         network: 'BT',  capacities: [] },
   L325:     { canonical: 'Watch 8 40mm LTE',        family: 'Watch 8',         network: 'LTE', capacities: [] },

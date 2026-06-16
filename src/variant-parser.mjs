@@ -23,7 +23,7 @@ const MODEL_PATTERNS = [
       : (raw === '+' || raw === 'plus') ? '+' : '';
     return `S${num}${suffix}`;
   } },
-  { regex: /\bWatch\s*(Ultra|\d+\s*Classic|\d+)\b/i, map: (_, model) => `Watch ${String(model).replace(/\s+/g, ' ').trim()}` },
+  // Watch 已移出通用 lossy 表 → 见 resolveWatchModel（多家族同串会 drop，避免 standalone 误分类）。
   { regex: /\bBuds\s*(\d+\s*FE|\d+\s*Pro|\d+|Core)\b/i, map: (_, model) => `Buds ${String(model).replace(/\s+/g, ' ').trim()}` },
   { regex: /\bFit\s*(\d+)\b/i, map: (_, num) => `Fit ${num}` },
 ];
@@ -141,6 +141,26 @@ function extractTier(text) {
   return '';
 }
 
+// 手表型号精确解析（替代旧的通用 lossy「\bWatch\s*…」正则）。
+// 关键 multi-family-drop：一段文字里出现「多个不同手表家族」(营销标题 "Watch 8 Classic Watch Ultra 2025"
+// 或 mixed listing "Watch Ultra / Watch 8 / Watch 8 Classic") → 返回 ''，交由权威来源
+// （厂方代号 lookupWearableByCode / itemModel）定型，避免 standalone 单品被「首个家族」误分类。
+// 仅单一家族时给泛型标签 Watch Ultra / Watch N / Watch N Classic（细分尺寸/连接由 code-first 负责）。
+// 用 \bwatch（仅前词边界）而非 \bWatch\b —— "Watch8" 后无词边界（见 samsung-master modelCategory 注释）。
+export function resolveWatchModel(text) {
+  const s = String(text || '');
+  if (!/\bwatch/i.test(s)) return ''; // 不是手表：手机/平板里的 "Ultra" 不会被劫持
+  const re = /watch\s*(ultra|(\d+)\s*classic|(\d+))/gi;
+  const families = new Set();
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    if (/ultra/i.test(m[1])) families.add('Watch Ultra 2025');
+    else if (m[2]) families.add(`Watch ${m[2]} Classic`);
+    else if (m[3]) families.add(`Watch ${m[3]}`);
+  }
+  return families.size === 1 ? [...families][0] : ''; // 0=没解析出；>1=多家族 → drop
+}
+
 function extractModel(text) {
   // 剥掉赠品后缀如 "(+Buds Core)" / "(+ 15W Charger)"：以 + 开头的括号是赠品，不是型号；
   // 不碰容量括号 "(12+256)"（以数字开头）。否则手机会被误判成 Buds Core 等赠品名。
@@ -169,6 +189,8 @@ function extractModel(text) {
     else if (raw === '+' || raw === 'plus') suffix = '+';
     return `S${compact[1]}${suffix}`;
   }
+  const watch = resolveWatchModel(source);
+  if (watch) return watch;
   for (const pattern of MODEL_PATTERNS) {
     const match = source.match(pattern.regex);
     if (match) return normalizeSpaces(pattern.map(...match));
