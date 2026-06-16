@@ -58,16 +58,18 @@ export function extractFromPdp(json) {
   const tiers = item.tier_variations ?? [];
   const models = item.models ?? [];
 
-  // 灰掉/不可选(disabled)的 variant 不计入：Shopee PDP 的 is_grayout=true / is_clickable=false
-  // 表示该组合在页面上灰色、不能购买(如停产的 Flip 7 FE 颜色)。严格判断——只在字段明确为 true/false 时过滤，
-  // 字段缺失(undefined)不动，避免像 A06 那种 is_grayout 恒 false 的 listing 误伤。只看 has_stock 会漏掉
-  // 「有货字段为 true 但页面灰掉」这种情况(Flip 7 FE 就是)。验证数据见 out/pdp-raw.json(Fold 7：灰款 grayout=true)。
+  // 灰掉/不可选(disabled)的 variant 不再丢弃，而是保留并标记 available=false：Shopee PDP 的
+  // is_grayout=true / is_clickable=false 表示该组合在页面上灰色、不能购买(如停产的 Flip 7 FE 颜色)。
+  // available=true 的条件：不是 is_grayout，且 is_clickable 不是 false。严格判断——字段缺失(undefined)
+  // 视为可买(available=true)，避免像 A06 那种 is_grayout 恒 false / 字段缺失的 listing 误伤。
+  // 保留全部 variant 是为了让下游能判断「整个 capacity/model 全灰」→ 前端显示 Not Available；
+  // 单颜色灰仍可被前端忽略。验证数据见 out/pdp-raw.json(Fold 7：灰款 grayout=true)。
   const isDisabledModel = (mdl) => mdl.is_grayout === true || mdl.is_clickable === false;
-  const skippedDisabled = models.filter(isDisabledModel).length;
-  if (skippedDisabled) console.error(`[scraper] 跳过 ${skippedDisabled} 个灰掉/不可选 variant(${title})`);
+  const disabledCount = models.filter(isDisabledModel).length;
+  if (disabledCount) console.error(`[scraper] 保留 ${disabledCount} 个灰掉/不可选 variant 并标记 available=false(${title})`);
 
   // 每个 model 的 extinfo.tier_index 指向各 tier 的第几个选项，拼成款式名
-  const variants = models.filter((mdl) => !isDisabledModel(mdl)).map((mdl) => {
+  const variants = models.map((mdl) => {
     // 从所有 tier 维度重建完整款式名。Shopee 的多维变体(如「Set Package」×「Model+Color」)里，
     // mdl.name 常只含一维(如 "Set A")，会丢掉型号/容量/颜色/网络那一维 → 必须按 tier_index 拼全维度。
     const dims = (tiers.length && Array.isArray(mdl.extinfo?.tier_index))
@@ -87,6 +89,9 @@ export function extractFromPdp(json) {
       // 售罄判断：Shopee 的 mdl.stock 常为 null，真正可靠的是 has_stock(布尔)。
       // 严格 === false，避免字段缺失(undefined)时把全部误判成售罄。
       sold_out: mdl.has_stock === false || mdl.stock === 0,
+      // 是否可买/可选：false=页面灰掉(is_grayout / is_clickable===false)。下游据此判断
+      // 「整 capacity / 整 model 全灰」→ 前端显示 Not Available。字段缺失视为可买。
+      available: !isDisabledModel(mdl),
       // ── trace 原始字段（Phase 1 仅用于 out/traces，不参与写库/同步）──
       _raw: {
         modelName: mdl.name || '',
@@ -113,6 +118,7 @@ export function extractFromPdp(json) {
       current: RM(item.price),
       stock: item.stock ?? item.normal_stock,
       sold_out: item.has_stock === false || item.stock === 0,
+      available: true,
     });
   }
 
