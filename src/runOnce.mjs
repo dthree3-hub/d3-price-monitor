@@ -104,6 +104,8 @@ function normalizeScrapedProduct(product, scraped) {
     promoPrice: variant.promo_price,
     stock: variant.stock,
     inStock: !variant.sold_out,
+    // 是否可买/可选(页面没灰)；scraper 未给(旧数据)时默认可买。下游写 D1 available 列。
+    available: variant.available !== false,
     voucherAmount: variantVoucherAmount(variant.current, vouchers),
   }));
   const record = attachCompetitorMeta({
@@ -231,6 +233,7 @@ async function scrapeOne(product, mode) {
       promoPrice: variant.promo_price,
       stock: variant.stock,
       inStock: !variant.sold_out,
+      available: variant.available !== false,
     })),
   }, product);
 }

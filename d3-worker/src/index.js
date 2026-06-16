@@ -35,6 +35,8 @@ function rowsToRecords(rows) {
       voucherAmount: r.voucher_amount ?? 0,
       soldOut,
       inStock: !soldOut,
+      // 是否可买/可选(页面没灰)；缺省(旧行/未迁移)按可买。前端 Phase 3 据此显示 Not Available。
+      available: r.available !== 0,
     });
   }
   // 整个 listing 售罄 = 所有款式都售罄（兼容旧的「记录级 soldOut」语义）
@@ -202,7 +204,7 @@ export default {
     // Returns {records:[...]} compatible with existing frontend
     if (pathname === '/api/records' && request.method === 'GET') {
       const { results } = await env.DB.prepare(`
-        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, color, variant_name, grabbed_at
+        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, available, color, variant_name, grabbed_at
         FROM variant_prices
         ORDER BY shop_id, item_id, model, tier, capacity
       `).all();
@@ -280,13 +282,14 @@ export default {
           itemRows.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
-                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, color, variant_name, grabbed_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, available, color, variant_name, grabbed_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
               ON CONFLICT(shop_id, item_id, model, tier, capacity, color) DO UPDATE SET
                 title=excluded.title, sku=excluded.sku,
                 price=excluded.price,
                 voucher_amount=excluded.voucher_amount,
                 sold_out=excluded.sold_out,
+                available=excluded.available,
                 color=excluded.color, variant_name=excluded.variant_name,
                 grabbed_at=excluded.grabbed_at, updated_at=datetime('now')
             `).bind(
@@ -294,6 +297,7 @@ export default {
               v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
               v.voucherAmount ?? rec.voucherAmount ?? 0,
               (v.inStock === false || rec.soldOut) ? 1 : 0,
+              v.available === false ? 0 : 1,
               v.color || '', v.variantName || v.name || '',
               rec.grabbedAt || new Date().toISOString()
             )
