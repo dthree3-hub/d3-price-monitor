@@ -58,8 +58,16 @@ export function extractFromPdp(json) {
   const tiers = item.tier_variations ?? [];
   const models = item.models ?? [];
 
+  // 灰掉/不可选(disabled)的 variant 不计入：Shopee PDP 的 is_grayout=true / is_clickable=false
+  // 表示该组合在页面上灰色、不能购买(如停产的 Flip 7 FE 颜色)。严格判断——只在字段明确为 true/false 时过滤，
+  // 字段缺失(undefined)不动，避免像 A06 那种 is_grayout 恒 false 的 listing 误伤。只看 has_stock 会漏掉
+  // 「有货字段为 true 但页面灰掉」这种情况(Flip 7 FE 就是)。验证数据见 out/pdp-raw.json(Fold 7：灰款 grayout=true)。
+  const isDisabledModel = (mdl) => mdl.is_grayout === true || mdl.is_clickable === false;
+  const skippedDisabled = models.filter(isDisabledModel).length;
+  if (skippedDisabled) console.error(`[scraper] 跳过 ${skippedDisabled} 个灰掉/不可选 variant(${title})`);
+
   // 每个 model 的 extinfo.tier_index 指向各 tier 的第几个选项，拼成款式名
-  const variants = models.map((mdl) => {
+  const variants = models.filter((mdl) => !isDisabledModel(mdl)).map((mdl) => {
     // 从所有 tier 维度重建完整款式名。Shopee 的多维变体(如「Set Package」×「Model+Color」)里，
     // mdl.name 常只含一维(如 "Set A")，会丢掉型号/容量/颜色/网络那一维 → 必须按 tier_index 拼全维度。
     const dims = (tiers.length && Array.isArray(mdl.extinfo?.tier_index))
@@ -90,6 +98,8 @@ export function extractFromPdp(json) {
         priceBeforeDiscount: RM(mdl.price_before_discount),
         modelId: mdl.model_id,
         status: mdl.status,
+        isGrayout: mdl.is_grayout,
+        isClickable: mdl.is_clickable,
       },
     };
   });
