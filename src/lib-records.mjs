@@ -71,6 +71,7 @@ export function normalizeVariant(variant, context = {}) {
     promoPrice: toNumberOrNull(variant.promoPrice),
     stock: variant.stock == null ? null : Number(variant.stock),
     inStock: Boolean(variant.inStock),
+    available: variant.available !== false,
     voucherAmount: toNumberOrNull(variant.voucherAmount) ?? 0,
   };
 }
