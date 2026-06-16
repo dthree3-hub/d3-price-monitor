@@ -1933,6 +1933,8 @@ function normalizeVariant(variant, context = {}) {
     promoPrice: toNumberOrNull(variant.promoPrice),
     stock: variant.stock == null ? null : Number(variant.stock),
     inStock: Boolean(variant.inStock),
+    // 是否可买/可选（页面没灰）。API 已返回；缺省（旧数据/本地导入）按可买，避免误判 Not Available。
+    available: variant.available !== false,
   };
 }
 
@@ -2576,6 +2578,8 @@ function escapeAttribute(value) {
   .price-num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:left}
   .price-dash{display:flex;align-items:center;justify-content:center;color:#c4b8a6;font-variant-numeric:tabular-nums}
   .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
+  .na-cell{color:#b23a2b;font-style:italic;font-weight:600;font-size:12px}
+  .boss-table td.na-cell{text-align:center}
   .takeback-pos{color:#27401f;font-weight:700}
   .takeback-neg{color:#b23a2b;font-weight:700}
   .takeback-zero{color:#999;font-weight:700}
@@ -2828,6 +2832,7 @@ function escapeAttribute(value) {
     const models = new Map();
     const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价
     const selfTiers = {}; // 我们自己的 Basic / Promo 分价
+    const selfMeta = {}; // mk → {hasAny,hasAvail}：自家是否有记录 / 是否有可买变体（判 Not Available）
     const sources = new Map(); // mk → [{title,shopId,itemId,sellerName,role}]
     for (const r of latest) {
       const role = SHOP_ROLES[String(r.shopId)];
@@ -2860,23 +2865,36 @@ function escapeAttribute(value) {
         if (!_srcArr.some(s => s.shopId === r.shopId && s.itemId === r.itemId)) {
           _srcArr.push({ title: r.title, shopId: String(r.shopId), itemId: String(r.itemId), sellerName: r.sellerName || roleName(role), role });
         }
+        // available=false（页面灰掉/不可选）的变体不计入最低价，但记下「有记录」→ 整 model+capacity
+        // 全灰时显示 Not Available。字段缺失（本地导入/旧数据）按可买处理；单色灰只是被排除在 min 外，
+        // 不影响同一 model+capacity 其它颜色的正常价（满足规则 1/4）。
+        const isAvail = v.available !== false;
         if (role === 'self') {
-          selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
-          if (!selfTiers[mk]) selfTiers[mk] = {};
-          selfTiers[mk][ct] = Math.min(selfTiers[mk][ct] == null ? Infinity : selfTiers[mk][ct], effectivePrice);
+          if (!selfMeta[mk]) selfMeta[mk] = { hasAny: false, hasAvail: false };
+          selfMeta[mk].hasAny = true;
+          if (isAvail) {
+            selfMeta[mk].hasAvail = true;
+            selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
+            if (!selfTiers[mk]) selfTiers[mk] = {};
+            selfTiers[mk][ct] = Math.min(selfTiers[mk][ct] == null ? Infinity : selfTiers[mk][ct], effectivePrice);
+          }
           continue;
         }
         const byRole = models.get(mk);
-        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {} };
-        byRole[role].min = Math.min(byRole[role].min, effectivePrice);
-        byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {}, hasAny: false, hasAvail: false };
+        byRole[role].hasAny = true;
+        if (isAvail) {
+          byRole[role].hasAvail = true;
+          byRole[role].min = Math.min(byRole[role].min, effectivePrice);
+          byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+        }
       }
     }
-    return { models, selfPrices, selfTiers, sources };
+    return { models, selfPrices, selfTiers, selfMeta, sources };
   }
 
   function bossRender() {
-    const { models, selfPrices, selfTiers, sources } = build();
+    const { models, selfPrices, selfTiers, selfMeta, sources } = build();
     document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
 
     const modelKeys = [...models.keys()].sort((a, b) => modelSortKey(a).localeCompare(modelSortKey(b)));
@@ -2958,7 +2976,9 @@ function escapeAttribute(value) {
       }
       const cells = visibleRoles.map((L) => {
         const rd = byRole[L];
-        if (!rd || rd.min == null || rd.min === Infinity) return '<td class="empty-cell">—</td>';
+        if (!rd || !rd.hasAny) return '<td class="empty-cell">—</td>';
+        // 该 model+capacity 有记录但全部灰掉/不可选 → Not Available（规则 2/3）。
+        if (!rd.hasAvail) return '<td class="empty-cell na-cell">Not Available</td>';
         const isLowestComp = best && best.role === L; // 该对手是全场最低对手
         const tiers = rd.tiers || {};
         const extraKeys = Object.keys(tiers).filter((k) => !TIER_ORDER.includes(k)); // 如 Standard 等非标准档也要显示
@@ -2991,6 +3011,9 @@ function escapeAttribute(value) {
           return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span></div>`;
         }).join('');
         ourCell = `<div class="tier-stack">${rows}</div>`;
+      } else if (manual == null && selfMeta[mk] && selfMeta[mk].hasAny && !selfMeta[mk].hasAvail) {
+        // 自家这个 model+capacity 有记录但全部灰掉/不可选 → Not Available（仍可手动填价覆盖）。
+        ourCell = '<span class="na-cell">Not Available</span>';
       } else {
         ourCell = `<input class="ourprice-input" data-model="${esc(mk)}" type="number" inputmode="numeric" value="${manual == null ? '' : manual}" placeholder="Enter price">`;
       }
