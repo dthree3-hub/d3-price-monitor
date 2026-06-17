@@ -1938,6 +1938,22 @@ function normalizeVariant(variant, context = {}) {
   };
 }
 
+// 手表型号精确解析（与后端 src/variant-parser.mjs resolveWatchModel 同一语义，刻意保持一致）。
+// 多家族同串（营销标题 / mixed）→ '' 交 itemModel 定；单家族 → 泛型 Watch Ultra / Watch N / Watch N Classic。
+function resolveWatchModel(text) {
+  const s = String(text || '');
+  if (!/\bwatch/i.test(s)) return '';
+  const re = /watch\s*(ultra|(\d+)\s*classic|(\d+))/gi;
+  const families = new Set();
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    if (/ultra/i.test(m[1])) families.add('Watch Ultra 2025');
+    else if (m[2]) families.add(`Watch ${m[2]} Classic`);
+    else if (m[3]) families.add(`Watch ${m[3]}`);
+  }
+  return families.size === 1 ? [...families][0] : '';
+}
+
 function inferVariantMeta(rawName, context = {}) {
   const normalizeSpaces = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const cleanModel = (text) => normalizeSpaces(String(text || '')
@@ -1962,8 +1978,8 @@ function inferVariantMeta(rawName, context = {}) {
     if (m) return `Z ${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}`;
     m = s.match(/\bTab\s*(A\d+|S\d+\s*(?:FE|Lite|Ultra)?)\b/i);
     if (m) return `Tab ${normalizeSpaces(m[1])}`;
-    m = s.match(/\bWatch\s*(Ultra|\d+\s*Classic|\d+)\b/i);
-    if (m) return `Watch ${normalizeSpaces(m[1])}`;
+    const watch = resolveWatchModel(s);
+    if (watch) return watch;
     return '';
   };
   const normalizeCapacity = (text) => {
