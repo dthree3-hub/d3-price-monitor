@@ -2713,6 +2713,7 @@ function escapeAttribute(value) {
       .replace(/\s*\d+\s*(GB|TB)\s*$/i, '')   // 存储
       .replace(/\b\d+\s*mm\b/gi, ' ')          // 手表尺寸 40mm/44mm/46mm
       .replace(/\b(4G|5G|LTE|BT)\b/gi, ' ')    // 网络/连接(含手表 BT)
+      .replace(/\bWi[\s-]?Fi\b/gi, ' ')        // [Leon] 平板 WiFi 款：剥 WiFi 让「Tab A11 WiFi」匹配「Tab A11」，消除 ⚠ 误报
       .replace(/\s+/g, ' ').trim().toLowerCase();
     // 大小写不敏感（竞品有 "Buds 4 PRO"/"Buds CORE" 这种大写）
     return [...SAMSUNG_KNOWN_FAMILIES].some((f) => f.toLowerCase() === fam);
@@ -2738,6 +2739,20 @@ function escapeAttribute(value) {
       // Watch: 先非 Ultra(按代号) 后 Ultra(按年份)，Classic 排同代基础款之后；Buds: Core(0000)→3→4→4 Pro。
       const inner4 = sub === '2' ? `${ultra4}|${n4}|${year4}|${classic4}` : `${n4}|${pro4}`;
       return `4|${sub}|${inner4}`;
+    }
+    if (cat === 3) {
+      // [Leon] Tablet 按产品线排序：先 A 系后 S 系 → 型号数字 → 等级(Lite<FE<FE+<Base<+<Ultra) → 连接(WiFi<4G<5G) → 存储。
+      // 修复 A11+ 因「+」字串排序被挤到 S11 之后；等级优先于连接(S11 Ultra 排在 S11 5G 之前)。只动 Tablet，不影响手机(cat 0/1)。
+      const body = s.replace(/^tab\s+/i, '');
+      const tLetter = /^a/i.test(body) ? '0' : (/^s/i.test(body) ? '1' : '2');
+      const tnum = (body.match(/\d+/) || ['0'])[0].padStart(4, '0');
+      const tier = /\blite\b/i.test(body) ? '0'
+        : (/\bFE\s*\+/i.test(body) ? '2' : (/\bFE\b/i.test(body) ? '1'
+          : (/ultra/i.test(body) ? '5' : (/(?:\+|plus)/i.test(body) ? '4' : '3'))));
+      const tconn = /5g/i.test(body) ? '2' : (/\b(4G|LTE)\b/i.test(body) ? '1' : '0');
+      const tstorM = body.match(/(\d+)\s*(GB|TB)\b/i);
+      const tstor = tstorM ? (parseInt(tstorM[1]) * (/TB/i.test(tstorM[2]) ? 1000 : 1)).toString().padStart(6, '0') : '000000';
+      return `3|${tLetter}|${tnum}|${tier}|${tconn}|${tstor}`;
     }
     const numM = s.match(/[a-zA-Z]+(\d+)/);
     const num = numM ? parseInt(numM[1]).toString().padStart(4, '0') : '0000';
