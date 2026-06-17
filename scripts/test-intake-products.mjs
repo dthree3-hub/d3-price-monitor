@@ -123,7 +123,8 @@ function makeEnv() {
     createElement(tag) { return makeEl(tag); },
     body: makeEl('body'),
     readyState: 'complete',
-    addEventListener() {},
+    listeners: {},
+    addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); },
   };
   // Elements that carry the `hidden` attribute in index.html (toggled by the IIFE).
   ['pi-merchant-manage', 'pi-overlay', 'pi-review-banner', 'pi-cancel'].forEach((id) => {
@@ -186,6 +187,10 @@ function makeEnv() {
       return null;
     },
     openModal: () => document.getElementById('pi-launch').click(),
+    overlayHidden: () => document.getElementById('pi-overlay').hidden,
+    clickClose: () => document.getElementById('pi-close').click(),
+    clickOverlay: () => { const o = document.getElementById('pi-overlay'); o.dispatch('click', { target: o }); },
+    pressKey: (key) => (document.listeners.keydown || []).forEach((f) => f({ key })),
     // Fill the add-product form and submit it (mirrors a user clicking "Add Product").
     addProduct: ({ url = '', model = '', merchant = '', ram = '', storage = '' }) => {
       document.getElementById('pi-url').value = url; document.getElementById('pi-model').value = model;
@@ -207,6 +212,39 @@ test('IIFE seeds the 4 default merchants into the dropdown', () => {
   const env = makeEnv();
   assert.deepEqual(env.dropdownNames(), ['D3', 'Deal Direct', 'TAC', 'Spray']);
   assert.ok(env.registry().every((m) => m.is_default === true));
+});
+
+test('modal closes via the X button', () => {
+  const env = makeEnv();
+  env.openModal();
+  assert.equal(env.overlayHidden(), false, 'opened');
+  env.clickClose();
+  assert.equal(env.overlayHidden(), true, 'X closes');
+});
+
+test('modal closes via the Escape key', () => {
+  const env = makeEnv();
+  env.openModal();
+  assert.equal(env.overlayHidden(), false);
+  env.pressKey('Escape');
+  assert.equal(env.overlayHidden(), true, 'Esc closes');
+});
+
+test('modal closes via clicking the backdrop overlay', () => {
+  const env = makeEnv();
+  env.openModal();
+  assert.equal(env.overlayHidden(), false);
+  env.clickOverlay();
+  assert.equal(env.overlayHidden(), true, 'overlay click closes');
+});
+
+test('closing clears editing state but keeps saved products in localStorage', () => {
+  const env = makeEnv();
+  env.setProducts([{ id: 'p1', merchant_name: 'D3', model_name: 'Keep Me', status: 'Active', shopee_url: 'https://shopee.com.my/x-i.1.2' }]);
+  env.openModal();
+  env.clickClose();
+  assert.equal(env.products().length, 1, 'saved product not wiped on close');
+  assert.equal(env.products()[0].model_name, 'Keep Me');
 });
 
 test('add TEST_DELETE → delete → gone from localStorage, dropdown, and manage list', () => {

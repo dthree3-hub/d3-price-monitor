@@ -3239,7 +3239,7 @@ function escapeAttribute(value) {
             <textarea id="pi-notes" rows="2" placeholder="可空"></textarea></label>
           <div class="pi-actions">
             <button id="pi-save" type="submit">Add Product</button>
-            <button id="pi-cancel" type="button" class="pi-secondary" hidden>Cancel edit</button>
+            <button id="pi-cancel" type="button" class="pi-secondary">Cancel</button>
             <span class="pi-spacer"></span>
             <button id="pi-import" type="button" class="pi-secondary" title="从之前导出的 CSV 导入商品(换电脑/恢复用)">Import Products</button>
             <button id="pi-export" type="button" class="pi-secondary" title="导出 Active 商品为 Hermes 可直接读取的 CSV">Export Active Products</button>
@@ -3262,6 +3262,7 @@ function escapeAttribute(value) {
     <style>
       #pi-launch{position:fixed;right:14px;bottom:14px;z-index:99990;background:#3a2f1c;color:#f3e8cf;border:0;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
       #pi-overlay{position:fixed;inset:0;z-index:100002;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
+      #pi-overlay[hidden]{display:none} /* 关键:id 选择器的 display:flex 会盖过 [hidden],必须显式让 hidden 生效,否则 close() 无效 */
       .pi-modal{background:#fbf6ec;width:min(1100px,96vw);border-radius:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif;color:#3a2f1c}
       .pi-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
       .pi-head h2{margin:0;font-size:19px}
@@ -3398,14 +3399,14 @@ function escapeAttribute(value) {
       function clearForm(){
         $('pi-edit-id').value='';$('pi-url').value='';$('pi-model').value='';$('pi-ram').value='';$('pi-storage').value='';
         $('pi-category').value='Phone';$('pi-status').value='Active';$('pi-notes').value='';
-        $('pi-save').textContent='Add Product';$('pi-cancel').hidden=true;setMsg('');
+        $('pi-save').textContent='Add Product';setMsg('');
       }
       function editInto(id){
         var p=products().find(function(x){return x.id===id;});if(!p)return;
         $('pi-edit-id').value=p.id;$('pi-url').value=p.shopee_url;$('pi-model').value=p.model_name;
         $('pi-ram').value=p.ram||'';$('pi-storage').value=p.storage||'';$('pi-category').value=p.category||'Phone';
         fillMerchantSelect($('pi-merchant'));$('pi-merchant').value=p.merchant_name;$('pi-status').value=p.status||'Active';
-        $('pi-notes').value=p.notes||'';$('pi-save').textContent='Update Product';$('pi-cancel').hidden=false;
+        $('pi-notes').value=p.notes||'';$('pi-save').textContent='Update Product';
         $('pi-overlay').scrollTop=0;setMsg('编辑中…');
       }
       function toggleIgnore(id){
@@ -3560,13 +3561,17 @@ function escapeAttribute(value) {
       }
 
       function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
-      function close(){$('pi-overlay').hidden=true;}
+      // 关闭:隐藏浮层 + 清理 editing 状态(只清表单,不动 localStorage 已保存商品)。
+      function close(){clearForm();$('pi-overlay').hidden=true;}
 
       function init(){
         $('pi-launch').addEventListener('click',open);
         $('pi-close').addEventListener('click',close);
         $('pi-form').addEventListener('submit',submit);
-        $('pi-cancel').addEventListener('click',clearForm);
+        // 编辑中 → 退出编辑(留在浮层);非编辑 → 直接关闭浮层。
+        $('pi-cancel').addEventListener('click',function(){if($('pi-edit-id').value){clearForm();}else{close();}});
+        // ESC 关闭(仅当浮层开着)。
+        document.addEventListener('keydown',function(e){if((e.key==='Escape'||e.key==='Esc')&&!$('pi-overlay').hidden)close();});
         $('pi-add-merchant').addEventListener('click',addMerchant);
         $('pi-manage-merchant').addEventListener('click',function(){
           var box=$('pi-merchant-manage');box.hidden=!box.hidden;if(!box.hidden)renderMerchantList();
