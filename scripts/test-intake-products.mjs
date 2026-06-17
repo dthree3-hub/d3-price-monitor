@@ -110,7 +110,7 @@ function makeEl(tag) {
   return el;
 }
 
-function makeEnv() {
+function makeEnv({ search = '?intake=1' } = {}) {
   const store = new Map();
   const localStorage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -148,10 +148,10 @@ function makeEnv() {
     return m[m.length - 1].replace(/^<script>/, '').replace(/<\/script>$/, '');
   })();
   const cryptoStub = { randomUUID: (() => { let n = 0; return () => `uid-${++n}`; })() };
-  const fn = new Function('document', 'localStorage', 'crypto', 'confirm', 'alert', 'prompt', 'Blob', 'URL', 'FileReader', 'console', code);
+  const fn = new Function('document', 'localStorage', 'crypto', 'confirm', 'alert', 'prompt', 'Blob', 'URL', 'FileReader', 'location', 'console', code);
   fn(document, localStorage, cryptoStub,
     (...a) => confirmImpl(...a), (m) => alerts.push(m), (...a) => promptImpl(...a),
-    BlobStub, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, FileReaderStub, console);
+    BlobStub, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, FileReaderStub, { search }, console);
   return {
     byId, alerts,
     setConfirm: (f) => { confirmImpl = f; },
@@ -186,6 +186,7 @@ function makeEnv() {
       return null;
     },
     openModal: () => document.getElementById('pi-launch').click(),
+    launchHidden: () => document.getElementById('pi-launch').hidden,
     // Fill the add-product form and submit it (mirrors a user clicking "Add Product").
     addProduct: ({ url = '', model = '', merchant = '', ram = '', storage = '' }) => {
       document.getElementById('pi-url').value = url; document.getElementById('pi-model').value = model;
@@ -202,6 +203,17 @@ function makeEnv() {
     },
   };
 }
+
+test('internal-entry gate: launcher hidden without ?intake=1', () => {
+  const env = makeEnv({ search: '' });
+  assert.equal(env.launchHidden(), true, 'pi-launch hidden for normal customers');
+});
+
+test('internal-entry gate: launcher shown with ?intake=1', () => {
+  assert.equal(makeEnv({ search: '?intake=1' }).launchHidden(), false);
+  assert.equal(makeEnv({ search: '?foo=bar&intake=1' }).launchHidden(), false, 'works as a non-first param');
+  assert.equal(makeEnv({ search: '?intake=12' }).launchHidden(), true, 'intake=12 must NOT enable (no false-positive)');
+});
 
 test('IIFE seeds the 4 default merchants into the dropdown', () => {
   const env = makeEnv();
