@@ -214,6 +214,32 @@ test('IIFE seeds the 4 default merchants into the dropdown', () => {
   assert.ok(env.registry().every((m) => m.is_default === true));
 });
 
+const INDEX_HTML = fs.readFileSync(new URL('../d3-price/index.html', import.meta.url), 'utf8');
+
+test('launch button displays the "Product Intake" text (not icon-only / empty box)', () => {
+  const m = INDEX_HTML.match(/<button id="pi-launch"[^>]*>([\s\S]*?)<\/button>/);
+  assert.ok(m, 'pi-launch button present');
+  assert.match(m[1], /Product Intake/, 'button label includes "Product Intake"');
+});
+
+test('launch button is fixed top-right, not bottom-right, with visible text', () => {
+  const css = (INDEX_HTML.match(/#pi-launch\s*\{([^}]*)\}/) || [])[1] || '';
+  assert.match(css, /position:\s*fixed/);
+  assert.match(css, /top:\s*\d/, 'anchored to top');
+  assert.match(css, /right:\s*\d/, 'anchored to right');
+  assert.doesNotMatch(css, /bottom:\s*\d+px/, 'no bottom px anchor (no longer bottom-right)');
+  assert.doesNotMatch(css, /font-size:\s*0\b/, 'font-size not 0');
+  assert.doesNotMatch(css, /text-indent:\s*-/, 'no negative text-indent hiding text');
+  assert.doesNotMatch(css, /overflow:\s*hidden/, 'text not clipped by overflow:hidden');
+});
+
+test('clicking the launch button opens the modal', () => {
+  const env = makeEnv();
+  assert.equal(env.overlayHidden(), true, 'closed initially');
+  env.openModal();
+  assert.equal(env.overlayHidden(), false, 'opens on click');
+});
+
 test('modal closes via the X button', () => {
   const env = makeEnv();
   env.openModal();

@@ -3260,7 +3260,8 @@ function escapeAttribute(value) {
       </div>
     </div>
     <style>
-      #pi-launch{position:fixed;right:14px;bottom:14px;z-index:99990;background:#3a2f1c;color:#f3e8cf;border:0;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+      /* 右上角内部入口;ID 选择器盖过全局 button{color:white;background:var(--accent)}。显式声明保证文字可见、宽度自适应、不被裁切。 */
+      #pi-launch{position:fixed;top:16px;right:16px;bottom:auto;left:auto;z-index:99990;display:inline-flex;align-items:center;justify-content:center;gap:6px;width:auto;min-width:0;max-width:none;height:auto;background:#3b2a1a;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;line-height:1.2;text-indent:0;letter-spacing:normal;white-space:nowrap;overflow:visible;text-overflow:clip;box-shadow:0 4px 12px rgba(0,0,0,.18);cursor:pointer}
       #pi-overlay{position:fixed;inset:0;z-index:100002;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
       #pi-overlay[hidden]{display:none} /* 关键:id 选择器的 display:flex 会盖过 [hidden],必须显式让 hidden 生效,否则 close() 无效 */
       .pi-modal{background:#fbf6ec;width:min(1100px,96vw);border-radius:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif;color:#3a2f1c}
