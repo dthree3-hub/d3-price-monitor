@@ -3256,7 +3256,7 @@ function escapeAttribute(value) {
     </div>
     <style>
       #pi-launch{position:fixed;right:14px;bottom:14px;z-index:99990;background:#3a2f1c;color:#f3e8cf;border:0;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-      #pi-overlay{position:fixed;inset:0;z-index:99991;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
+      #pi-overlay{position:fixed;inset:0;z-index:100002;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
       .pi-modal{background:#fbf6ec;width:min(1100px,96vw);border-radius:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif;color:#3a2f1c}
       .pi-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
       .pi-head h2{margin:0;font-size:19px}
@@ -3284,7 +3284,8 @@ function escapeAttribute(value) {
       .pi-badge{display:inline-block;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600}
       .pi-st-active{background:#d8efd8;color:#2f7a3a}.pi-st-testing{background:#fbe9c8;color:#7a4d11}.pi-st-ignore{background:#eadfce;color:#8a7350}
       .pi-review{background:#f6d6cf;color:#9e3d2c}
-      .pi-rowbtn{border:1px solid #d7c19a;background:#fff;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:3px}
+      .pi-rowbtn{border:1px solid #d7c19a;background:#fff;color:#3a2f1c;font-weight:600;border-radius:6px;padding:2px 8px;font-size:11px;line-height:1.6;cursor:pointer;margin-right:3px}
+      .pi-rowbtn:hover{background:#f3e8cf}
       .pi-empty{color:#8a7350;font-size:13px;padding:10px 4px}
     </style>
     <script>
@@ -3312,7 +3313,9 @@ function escapeAttribute(value) {
       var $=function(id){return document.getElementById(id);};
       function fillMerchantSelect(sel){
         var cur=sel.value;sel.innerHTML='';
-        merchants().filter(function(m){return m.status==='active';}).forEach(function(m){
+        var ms=merchants().filter(function(m){return m.status==='active';});
+        if(!ms.length)ms=seedMerchants().filter(function(m){return m.status==='active';}); // 兜底:localStorage 写失败也保证有选项
+        ms.forEach(function(m){
           var o=document.createElement('option');o.value=m.merchant_name;o.textContent=m.merchant_name+(m.merchant_type==='our_store'?' (us)':'');sel.appendChild(o);});
         if(cur)sel.value=cur;
       }
@@ -3352,7 +3355,7 @@ function escapeAttribute(value) {
           var act=tr.lastChild;
           function btn(label,fn){var x=document.createElement('button');x.className='pi-rowbtn';x.textContent=label;x.onclick=fn;act.appendChild(x);}
           btn('Edit',function(){editInto(p.id);});
-          btn(st==='ignore'?'Enable':'Disable',function(){toggleIgnore(p.id);});
+          btn(st==='ignore'?'Enable':'Ignore',function(){toggleIgnore(p.id);});
           btn('Delete',function(){del(p.id);});
           tb.appendChild(tr);
         });
