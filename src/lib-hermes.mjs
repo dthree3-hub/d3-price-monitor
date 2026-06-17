@@ -219,12 +219,26 @@ export function computeBatchChanges(beforeRecords, afterRecords, latestTimestamp
   );
 }
 
-export function mergeNewRecords(incoming, products = loadProducts()) {
-  const allowedKeys = activeWatchlistKeys(products);
-  const before = readRecords().filter((record) => allowedKeys.has(`${record.shopId}:${record.itemId}`));
+// 普通 sweep 的记录合并：保留 records.json 全部历史，只 upsert 本次抓到的记录。
+// 不再按当前 products 清单 prune —— 否则 products 变少(例如只测 1 条 intake)会把旧记录删光。
+// 需要清理已下架/移除商品的记录时,走显式 pruneRecordsToWatchlist(),绝不在 sweep 自动触发。
+// 第二参数 products 已不参与过滤,仅为向后兼容保留(调用方仍可传)。
+export function mergeNewRecords(incoming, products = undefined) {
+  void products;
+  const before = readRecords();
   const merged = mergeRecords(before, incoming);
   writeRecords(merged);
   return { before, merged };
+}
+
+// 显式 cleanup:把 records.json 收敛到当前 watchlist —— 删掉 product_url 不在 products 清单里的旧记录。
+// 仅供专门的 cleanup 命令调用;普通 sweep 不要调用它。
+export function pruneRecordsToWatchlist(products = loadProducts()) {
+  const allowedKeys = activeWatchlistKeys(products);
+  const before = readRecords();
+  const kept = before.filter((record) => allowedKeys.has(`${record.shopId}:${record.itemId}`));
+  writeRecords(kept);
+  return { before, kept, removed: before.length - kept.length };
 }
 
 export function formatRm(value) {

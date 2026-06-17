@@ -4,7 +4,8 @@ import { parseVariantDescriptor } from './variant-parser.mjs';
 
 export const projectRoot = path.resolve(import.meta.dirname, '..');
 export const dataDir = path.join(projectRoot, 'data');
-export const recordsFile = path.join(dataDir, 'records.json');
+// 默认 data/records.json；允许用 D3_RECORDS_FILE 覆盖(测试用临时文件,生产不设此变量)。
+export const recordsFile = process.env.D3_RECORDS_FILE || path.join(dataDir, 'records.json');
 export const reportFile = path.join(projectRoot, 'out', 'daily-report.md');
 
 export function ensureDataFile() {
