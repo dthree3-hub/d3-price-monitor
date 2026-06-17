@@ -2595,6 +2595,7 @@ function escapeAttribute(value) {
   .price-dash{display:flex;align-items:center;justify-content:center;color:#c4b8a6;font-variant-numeric:tabular-nums}
   .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
   .na-cell{color:#b23a2b;font-style:italic;font-weight:600;font-size:12px}
+  .not-selling{color:#9c8f80;font-style:italic;font-size:13px} /* 该档位/商家没在卖(no price)。仅显示,不参与计算。 */
   .boss-table td.na-cell{text-align:center}
   .takeback-pos{color:#27401f;font-weight:700}
   .takeback-neg{color:#b23a2b;font-weight:700}
@@ -3007,7 +3008,7 @@ function escapeAttribute(value) {
       }
       const cells = visibleRoles.map((L) => {
         const rd = byRole[L];
-        if (!rd || !rd.hasAny) return '<td class="empty-cell">—</td>';
+        if (!rd || !rd.hasAny) return '<td class="empty-cell"><span class="not-selling">Not Selling</span></td>';
         // 该 model+capacity 有记录但全部灰掉/不可选 → Not Available（规则 2/3）。
         if (!rd.hasAvail) return '<td class="empty-cell na-cell">Not Available</td>';
         const isLowestComp = best && best.role === L; // 该对手是全场最低对手
@@ -3015,7 +3016,7 @@ function escapeAttribute(value) {
         const extraKeys = Object.keys(tiers).filter((k) => !TIER_ORDER.includes(k)); // 如 Standard 等非标准档也要显示
         const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
           const val = tiers[k];
-          if (val == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-dash">—</span></div>`;
+          if (val == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="not-selling">Not Selling</span></div>`;
           const cheaper = our != null && val < our;
           const hi = cheaper && isLowestComp && val === rd.min; // 只有低过我们时才高亮
           return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num${hi ? ' lowest' : ''}${cheaper ? ' cheaper' : ''}">${fmt(val)}</span></div>`;
@@ -3038,7 +3039,7 @@ function escapeAttribute(value) {
       if (st && (st['Basic'] != null || st['Promo'] != null || st['SET A'] != null)) {
         const extraKeys = Object.keys(st).filter((k) => !TIER_ORDER.includes(k));
         const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
-          if (st[k] == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-dash">—</span></div>`;
+          if (st[k] == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="not-selling">Not Selling</span></div>`;
           return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span></div>`;
         }).join('');
         ourCell = `<div class="tier-stack">${rows}</div>`;
