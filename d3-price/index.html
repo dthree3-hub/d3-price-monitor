@@ -3229,7 +3229,9 @@ function escapeAttribute(value) {
             <select id="pi-category"><option>Phone</option><option>Tablet</option><option>Watch</option><option>Buds</option></select></label>
           <label class="pi-field"><span>Merchant</span>
             <span class="pi-merchant-row"><select id="pi-merchant"></select>
-            <button id="pi-add-merchant" type="button" class="pi-mini">+ Add Merchant</button></span></label>
+            <button id="pi-add-merchant" type="button" class="pi-mini">+ Add Merchant</button>
+            <button id="pi-manage-merchant" type="button" class="pi-mini">Manage</button></span></label>
+          <div id="pi-merchant-manage" class="pi-col2 pi-mmanage" hidden><div id="pi-merchant-list"></div></div>
           <label class="pi-field"><span>Status</span>
             <select id="pi-status"><option>Active</option><option>Testing</option><option>Ignore</option></select></label>
           <label class="pi-field pi-col2"><span>Notes</span>
@@ -3270,6 +3272,11 @@ function escapeAttribute(value) {
       .pi-merchant-row{display:flex;gap:6px}
       .pi-merchant-row select{flex:1}
       .pi-mini{border:1px solid #c9a35a;background:#f1e3c4;border-radius:8px;padding:0 10px;cursor:pointer;font-size:12px;white-space:nowrap}
+      .pi-mmanage{border:1px solid #d7c19a;border-radius:8px;padding:6px 10px;background:#fff;margin-top:2px}
+      .pi-mrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #ead9b6}
+      .pi-mrow:last-child{border-bottom:0}
+      .pi-mname{font-size:13px;color:#3a2f1c}
+      .pi-mtag{display:inline-block;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;background:#eadfce;color:#8a7350;margin-left:6px}
       .pi-actions{grid-column:1 / span 2;display:flex;align-items:center;gap:8px;margin-top:4px}
       .pi-spacer{flex:1}
       .pi-actions button{border:0;border-radius:9px;padding:9px 14px;font-size:13px;cursor:pointer;background:#9a6b16;color:#fff}
@@ -3292,6 +3299,7 @@ function escapeAttribute(value) {
     (function(){
       var PI_PRODUCTS='d3_product_intake', PI_MERCHANTS='d3_merchant_registry';
       var DEFAULT_MERCHANTS=[['D3','our_store'],['Deal Direct','competitor'],['TAC','competitor'],['Spray','competitor']];
+      var DEFAULT_NAMES={};DEFAULT_MERCHANTS.forEach(function(x){DEFAULT_NAMES[x[0].toLowerCase()]=true;});
       function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
       function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
       function uid(){try{return crypto.randomUUID();}catch(e){return 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);}}
@@ -3306,11 +3314,13 @@ function escapeAttribute(value) {
         if(active.length)return m;        // 已有可用商家 → 不动
         var t=nowISO();                   // 无可用(空 / 全是坏数据)→ 用默认重种,修复 stale localStorage
         m=DEFAULT_MERCHANTS.map(function(x){
-          return {id:uid(),merchant_name:x[0],merchant_type:x[1],platform:'Shopee',status:'active',created_at:t,updated_at:t};});
+          return {id:uid(),merchant_name:x[0],merchant_type:x[1],platform:'Shopee',status:'active',is_default:true,created_at:t,updated_at:t};});
         save(PI_MERCHANTS,m);return m;
       }
       function merchants(){return load(PI_MERCHANTS,[]);}
       function products(){return load(PI_PRODUCTS,[]);}
+      // 默认商家(D3/Deal Direct/TAC/Spray)不可删/改;旧数据无 is_default 时按名兜底判定
+      function isDefault(m){return !!m&&(m.is_default===true||DEFAULT_NAMES[String(m.merchant_name||'').toLowerCase()]===true);}
 
       var $=function(id){return document.getElementById(id);};
       function fillMerchantSelect(sel){
@@ -3320,7 +3330,8 @@ function escapeAttribute(value) {
         if(!ms.length)ms=DEFAULT_MERCHANTS.map(function(x){return {merchant_name:x[0],merchant_type:x[1]};}); // 终极兜底:不依赖 localStorage
         ms.forEach(function(m){
           var o=document.createElement('option');o.value=m.merchant_name;o.textContent=m.merchant_name+(m.merchant_type==='our_store'?' (us)':'');sel.appendChild(o);});
-        if(cur)sel.value=cur;
+        var names=ms.map(function(m){return m.merchant_name;});
+        sel.value=(cur&&names.indexOf(cur)>=0)?cur:(names[0]||''); // 选中项若已被删 → reset 到第一个(D3),不残留旧名
       }
       function setMsg(t,ok){var e=$('pi-msg');e.textContent=t||'';e.className='pi-msg '+(t?(ok?'ok':'err'):'');}
 
@@ -3418,8 +3429,49 @@ function escapeAttribute(value) {
         if(merchants().some(function(m){return m.merchant_name.toLowerCase()===name.toLowerCase();})){alert('该商家已存在。');return;}
         var type=confirm('这是「我们自家店」吗?\n确定=our_store,取消=competitor')?'our_store':'competitor';
         var t=nowISO();var list=merchants();
-        list.push({id:uid(),merchant_name:name,merchant_type:type,platform:'Shopee',status:'active',created_at:t,updated_at:t});
+        list.push({id:uid(),merchant_name:name,merchant_type:type,platform:'Shopee',status:'active',is_default:false,created_at:t,updated_at:t});
         save(PI_MERCHANTS,list);fillMerchantSelect($('pi-merchant'));$('pi-merchant').value=name;
+        var box=$('pi-merchant-manage');if(box&&!box.hidden)renderMerchantList();
+      }
+
+      function renderMerchantList(){
+        var box=$('pi-merchant-list');if(!box)return;box.innerHTML='';
+        var ms=merchants().filter(function(m){return m.status==='active';});
+        if(!ms.length){box.innerHTML='<div class="pi-empty">No merchants.</div>';return;}
+        ms.forEach(function(m){
+          var row=document.createElement('div');row.className='pi-mrow';
+          var def=isDefault(m);
+          var left=document.createElement('span');left.className='pi-mname';
+          left.innerHTML=esc(m.merchant_name)+(m.merchant_type==='our_store'?' <span class="pi-mtag">us</span>':'')+(def?' <span class="pi-mtag">default</span>':'');
+          row.appendChild(left);
+          var right=document.createElement('span');
+          if(!def){
+            var e=document.createElement('button');e.type='button';e.className='pi-rowbtn';e.textContent='Edit';e.onclick=function(){editMerchant(m.id);};right.appendChild(e);
+            var d=document.createElement('button');d.type='button';d.className='pi-rowbtn';d.textContent='Delete';d.onclick=function(){deleteMerchant(m.id);};right.appendChild(d);
+          }
+          row.appendChild(right);box.appendChild(row);
+        });
+      }
+      function deleteMerchant(id){
+        var list=merchants();var m=list.find(function(x){return x.id===id;});if(!m)return;
+        if(isDefault(m)){alert('Default merchants cannot be deleted.');return;}
+        if(products().some(function(p){return p.merchant_name===m.merchant_name;})){alert('This merchant is used by existing products. Please delete or change those products first.');return;}
+        if(!confirm('Delete merchant '+m.merchant_name+'?'))return;
+        var name=m.merchant_name;
+        // 从最新 localStorage 读、删目标 + 任何同名非默认残留(防 stale 重复),再写回
+        save(PI_MERCHANTS,merchants().filter(function(x){return !(x.merchant_name===name&&!isDefault(x));}));
+        fillMerchantSelect($('pi-merchant'));renderMerchantList();renderList();
+      }
+      function editMerchant(id){
+        var list=merchants();var m=list.find(function(x){return x.id===id;});if(!m)return;
+        if(isDefault(m)){alert('Default merchants cannot be renamed.');return;}
+        var name=prompt('Rename merchant:',m.merchant_name);if(name==null)return;name=name.trim();if(!name)return;
+        if(list.some(function(x){return x.id!==id&&x.merchant_name.toLowerCase()===name.toLowerCase();})){alert('A merchant with that name already exists.');return;}
+        var old=m.merchant_name;m.merchant_name=name;m.updated_at=nowISO();
+        var ps=products();var changed=false;
+        ps.forEach(function(p){if(p.merchant_name===old){p.merchant_name=name;p.updated_at=nowISO();changed=true;}});
+        save(PI_MERCHANTS,list);if(changed)save(PI_PRODUCTS,ps);
+        fillMerchantSelect($('pi-merchant'));renderMerchantList();renderList();
       }
 
       // 导出 status=Active 的商品为 config/products.csv 兼容 CSV(给 Hermes 用,见 src/intake-products.mjs)
@@ -3448,6 +3500,9 @@ function escapeAttribute(value) {
         $('pi-form').addEventListener('submit',submit);
         $('pi-cancel').addEventListener('click',clearForm);
         $('pi-add-merchant').addEventListener('click',addMerchant);
+        $('pi-manage-merchant').addEventListener('click',function(){
+          var box=$('pi-merchant-manage');box.hidden=!box.hidden;if(!box.hidden)renderMerchantList();
+        });
         $('pi-export').addEventListener('click',exportActive);
         $('pi-overlay').addEventListener('click',function(e){if(e.target===$('pi-overlay'))close();});
         seedMerchants();
