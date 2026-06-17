@@ -3291,6 +3291,7 @@ function escapeAttribute(value) {
     <script>
     (function(){
       var PI_PRODUCTS='d3_product_intake', PI_MERCHANTS='d3_merchant_registry';
+      var DEFAULT_MERCHANTS=[['D3','our_store'],['Deal Direct','competitor'],['TAC','competitor'],['Spray','competitor']];
       function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
       function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
       function uid(){try{return crypto.randomUUID();}catch(e){return 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);}}
@@ -3301,9 +3302,10 @@ function escapeAttribute(value) {
 
       function seedMerchants(){
         var m=load(PI_MERCHANTS,null);
-        if(m&&m.length)return m;
-        var t=nowISO();
-        m=[['D3','our_store'],['Deal Direct','competitor'],['TAC','competitor'],['Spray','competitor']].map(function(x){
+        var active=(m||[]).filter(function(x){return x&&x.status==='active';});
+        if(active.length)return m;        // 已有可用商家 → 不动
+        var t=nowISO();                   // 无可用(空 / 全是坏数据)→ 用默认重种,修复 stale localStorage
+        m=DEFAULT_MERCHANTS.map(function(x){
           return {id:uid(),merchant_name:x[0],merchant_type:x[1],platform:'Shopee',status:'active',created_at:t,updated_at:t};});
         save(PI_MERCHANTS,m);return m;
       }
@@ -3314,7 +3316,8 @@ function escapeAttribute(value) {
       function fillMerchantSelect(sel){
         var cur=sel.value;sel.innerHTML='';
         var ms=merchants().filter(function(m){return m.status==='active';});
-        if(!ms.length)ms=seedMerchants().filter(function(m){return m.status==='active';}); // 兜底:localStorage 写失败也保证有选项
+        if(!ms.length){seedMerchants();ms=merchants().filter(function(m){return m.status==='active';});} // 修复 stale 后重读
+        if(!ms.length)ms=DEFAULT_MERCHANTS.map(function(x){return {merchant_name:x[0],merchant_type:x[1]};}); // 终极兜底:不依赖 localStorage
         ms.forEach(function(m){
           var o=document.createElement('option');o.value=m.merchant_name;o.textContent=m.merchant_name+(m.merchant_type==='our_store'?' (us)':'');sel.appendChild(o);});
         if(cur)sel.value=cur;
@@ -3439,7 +3442,7 @@ function escapeAttribute(value) {
       function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
       function close(){$('pi-overlay').hidden=true;}
 
-      document.addEventListener('DOMContentLoaded',function(){
+      function init(){
         $('pi-launch').addEventListener('click',open);
         $('pi-close').addEventListener('click',close);
         $('pi-form').addEventListener('submit',submit);
@@ -3448,7 +3451,10 @@ function escapeAttribute(value) {
         $('pi-export').addEventListener('click',exportActive);
         $('pi-overlay').addEventListener('click',function(e){if(e.target===$('pi-overlay'))close();});
         seedMerchants();
-      });
+        fillMerchantSelect($('pi-merchant')); // 页面加载即填充,不等点开浮层
+      }
+      // 脚本在 body 末尾,元素已就绪;readyState 兜底防早/晚触发
+      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
     })();
     </script>
   </body>
