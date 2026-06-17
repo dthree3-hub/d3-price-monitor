@@ -87,21 +87,67 @@ export function intakeRowsFromCsv(text) {
 
 // Hermes 侧入口：读 intake CSV（默认 config/product-intake.csv），返回可直接 append 到
 // loadProducts() 结果的行数组。文件不存在/读失败 → 返回 []（绝不抛，避免影响整轮 sweep）。
-export function loadIntakeProducts(csvPath) {
+// onError(可选)：读/解析失败时回调（用来打 warning），不传则静默。
+export function loadIntakeProducts(csvPath, onError) {
   const file = csvPath || path.join(process.cwd(), 'config', 'product-intake.csv');
   try {
     if (!fs.existsSync(file)) return [];
     return intakeRowsFromCsv(fs.readFileSync(file, 'utf8'));
-  } catch {
+  } catch (e) {
+    if (typeof onError === 'function') onError(e);
     return [];
   }
 }
 
-// ── Phase 2 接入示例（现在不要启用）──────────────────────────────
-// 在 sweep 取商品列表处改为合并，新商品只是 append、失败只记录不阻断：
-//
-//   import { loadProducts } from './lib-hermes.mjs';
-//   import { loadIntakeProducts } from './intake-products.mjs';
-//   const products = [...loadProducts(), ...loadIntakeProducts()];
-//
-// 现有 sweep 逻辑、batch cursor、records 合并均不需改动。
+// 合并去重用的 key：优先 merchant(=competitor) + item_id；解析不到 item_id → merchant + product_url。
+// base/intake 两边都是 loadProducts() 形状（competitor / product_url），所以同一套 key。
+function productKey(p) {
+  const merchant = String((p && p.competitor) || '').trim().toLowerCase();
+  const url = String((p && p.product_url) || '').trim();
+  const m = url.match(/i\.(\d+)\.(\d+)/) || url.match(/product\/(\d+)\/(\d+)/);
+  const itemId = m ? m[2] : '';
+  return itemId ? `${merchant}::i::${itemId}` : `${merchant}::u::${url.toLowerCase()}`;
+}
+
+// 合并 base(products.csv)与 intake(product-intake.csv)：base 原样全保留（顺序/数量不变），
+// intake 逐条去重后追加（与 base 或前面的 intake 撞 key 就跳过）。base 为空数组 → 返回 intake。
+// 关键不变量：mergeProducts(base, []) 与 base 完全等价 → intake 文件缺失时现有 sweep 零影响。
+export function mergeProducts(base, intake) {
+  const baseArr = Array.isArray(base) ? base : [];
+  const intakeArr = Array.isArray(intake) ? intake : [];
+  const seen = new Set(baseArr.map(productKey));
+  const out = baseArr.slice();
+  for (const p of intakeArr) {
+    const k = productKey(p);
+    if (seen.has(k)) continue; // 与 base 或已加入的 intake 重复 → 跳过
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
+}
+
+// 给 Hermes sweep 用的总入口：base + intake 合并去重、打统一日志、绝不 crash。
+//   loadSweepProducts(loadProducts(), { log: logHermes })
+// - intake 文件缺失/读失败 → intake=[]，base 照旧（loadIntakeProducts 已吞错，这里再兜一层）。
+// - 日志：[products] base=.. intake=.. merged=.. skipped_duplicates=..
+export function loadSweepProducts(baseProducts, { log = () => {}, csvPath } = {}) {
+  const base = Array.isArray(baseProducts) ? baseProducts : [];
+  let intake = [];
+  try {
+    intake = loadIntakeProducts(csvPath, (e) => log(`[products] WARN intake 读取/解析失败，已忽略: ${(e && e.message) || e}`));
+  } catch (e) {
+    log(`[products] WARN intake 读取/解析失败，已忽略: ${(e && e.message) || e}`);
+    intake = [];
+  }
+  const merged = mergeProducts(base, intake);
+  const skipped = (base.length + intake.length) - merged.length;
+  log(`[products] base=${base.length} intake=${intake.length} merged=${merged.length} skipped_duplicates=${skipped}`);
+  return merged;
+}
+
+// ── Phase 2 已接入（src/runOnce.mjs）──────────────────────────────
+// runOnce() 与 runSweep() 取商品处由：
+//   const products = loadProducts();
+// 改为：
+//   const products = loadSweepProducts(loadProducts(), { log: logHermes });
+// base 照旧、intake 去重追加、缺文件零影响、读错只 warning。batch cursor / records 合并均未改。

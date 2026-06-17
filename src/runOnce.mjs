@@ -24,6 +24,7 @@ import {
   writeHermesStatus,
 } from './lib-hermes.mjs';
 import { projectRoot } from './lib-records.mjs';
+import { loadSweepProducts } from './intake-products.mjs'; // Phase 2: 合并 config/product-intake.csv
 
 const reportPath = path.join(projectRoot, 'out', 'hermes-latest.md');
 const DEFAULT_CLOUD_RECORDS_URL = 'https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3';
@@ -267,7 +268,7 @@ export async function runOnce() {
   const mode = process.env.HERMES_SCRAPE_MODE || 'scraperapi';
   const itemDelayMs = Number(process.env.HERMES_ITEM_DELAY_MS || 2500);
   const abortSoftBlocks = Number(process.env.HERMES_ABORT_AFTER_SOFTBLOCKS || 2);
-  const allProducts = loadProducts();
+  const allProducts = loadSweepProducts(loadProducts(), { log: logHermes }); // base + product-intake.csv
   if (!allProducts.length) {
     usage();
     throw new Error(`没有可抓取的商品。先编辑 ${productsFile}`);
@@ -433,7 +434,7 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
   const abortSoftBlocks = Number(process.env.HERMES_ABORT_AFTER_SOFTBLOCKS || 2);
   const selfShop = String(process.env.HERMES_SELF_SHOP_ID || '54618012');
 
-  const all = loadProducts();
+  const all = loadSweepProducts(loadProducts(), { log: logHermes }); // base + product-intake.csv
   if (!all.length) {
     usage();
     throw new Error(`没有可抓取的商品。先编辑 ${productsFile}`);

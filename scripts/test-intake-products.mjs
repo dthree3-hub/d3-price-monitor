@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   intakeRowsFromCsv, loadIntakeProducts, INTAKE_CSV_HEADER, PRODUCT_INTAKE_CSV_HEADER,
+  mergeProducts, loadSweepProducts,
 } from '../src/intake-products.mjs';
 
 const HEADER = INTAKE_CSV_HEADER.join(',');
@@ -368,4 +369,71 @@ test('intakeRowsFromCsv maps the v2 export header to loadProducts shape', () => 
   assert.equal(rows[0].competitor, 'Deal Direct');
   assert.equal(rows[0].product_url, 'https://shopee.com.my/x-i.123456.789012');
   assert.equal(rows[0].variant, '12GB 256GB');
+});
+
+// ── Phase 2: sweep integration (mergeProducts / loadSweepProducts) ───────────
+
+const baseProd = (competitor, url) => ({ our_product: 'x', competitor, product_url: url, status: 'active' });
+
+test('mergeProducts(base, []) is identical to base (intake file missing → zero impact)', () => {
+  const base = [baseProd('D3', 'https://shopee.com.my/a-i.1.2'), baseProd('TAC', 'https://shopee.com.my/b-i.3.4')];
+  const merged = mergeProducts(base, []);
+  assert.deepEqual(merged, base);
+  assert.equal(merged.length, base.length);
+});
+
+test('mergeProducts dedups by merchant+item_id, then merchant+url', () => {
+  const base = [baseProd('D3', 'https://shopee.com.my/a-i.111.222')];
+  const intake = [
+    baseProd('D3', 'https://shopee.com.my/DIFFERENT-SLUG-i.111.222'), // same merchant+item_id → skip
+    baseProd('D3', 'https://shopee.com.my/c-i.111.999'),              // same merchant, diff item → keep
+    baseProd('TAC', 'https://shopee.com.my/no-ids-here'),             // no item_id → keyed by url → keep
+    baseProd('TAC', 'https://shopee.com.my/no-ids-here'),             // exact dup url → skip
+  ];
+  const merged = mergeProducts(base, intake);
+  assert.equal(merged.length, 3, '1 base + 2 unique intake');
+  assert.ok(merged.some((p) => p.product_url.includes('c-i.111.999')));
+  assert.equal(merged.filter((p) => p.product_url === 'https://shopee.com.my/no-ids-here').length, 1);
+});
+
+function writeIntake(rows) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'intake2-'));
+  const file = path.join(dir, 'product-intake.csv');
+  fs.writeFileSync(file, `${PRODUCT_INTAKE_CSV_HEADER.join(',')}\n${rows.join('\n')}\n`);
+  return { dir, file };
+}
+
+test('loadSweepProducts: no file → base unchanged, logs base/intake/merged', () => {
+  const logs = [];
+  const base = [baseProd('D3', 'https://shopee.com.my/a-i.1.2')];
+  const merged = loadSweepProducts(base, { log: (m) => logs.push(m), csvPath: '/nonexistent/product-intake.csv' });
+  assert.deepEqual(merged, base);
+  assert.ok(logs.some((l) => /\[products\] base=1 intake=0 merged=1 skipped_duplicates=0/.test(l)), logs.join('|'));
+});
+
+test('loadSweepProducts: Active enters, Ignore excluded, duplicates skipped', () => {
+  const { dir, file } = writeIntake([
+    'D3,222,111,Galaxy S26,12GB,256GB,Phone,https://shopee.com.my/a-i.111.222,Active', // dup of base → skip
+    'NEWSHOP,999,888,Galaxy A56,8GB,128GB,Phone,https://shopee.com.my/c-i.888.999,Active', // new → keep
+    'TAC,11,22,Watch S5,,,Watch,https://shopee.com.my/d-i.22.11,Ignore', // ignored → never loaded
+  ]);
+  const logs = [];
+  const base = [baseProd('D3', 'https://shopee.com.my/a-i.111.222')];
+  const merged = loadSweepProducts(base, { log: (m) => logs.push(m), csvPath: file });
+  assert.equal(merged.length, 2, 'base(1) + 1 new active');
+  assert.ok(merged.some((p) => p.competitor === 'NEWSHOP'));
+  assert.ok(!merged.some((p) => p.competitor === 'TAC'), 'Ignore never enters');
+  assert.ok(logs.some((l) => /\[products\] base=1 intake=2 merged=2 skipped_duplicates=1/.test(l)), logs.join('|'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('loadSweepProducts: broken CSV path (a directory) → warning, no crash, base kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'intake2-'));
+  const logs = [];
+  const base = [baseProd('D3', 'https://shopee.com.my/a-i.1.2')];
+  // pass the directory itself as csvPath → readFileSync throws EISDIR → caught + warned
+  const merged = loadSweepProducts(base, { log: (m) => logs.push(m), csvPath: dir });
+  assert.deepEqual(merged, base, 'base survives a broken intake read');
+  assert.ok(logs.some((l) => /WARN intake/.test(l)), 'a warning was logged');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
