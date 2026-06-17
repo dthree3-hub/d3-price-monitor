@@ -3214,6 +3214,7 @@ function escapeAttribute(value) {
           <h2>Product Intake <span class="pi-sub">内部 · 手动新增监控商品(Phase 1：存本机浏览器)</span></h2>
           <button id="pi-close" type="button" class="pi-x" title="关闭">✕</button>
         </div>
+        <div id="pi-stats" class="pi-stats"></div>
         <div id="pi-review-banner" class="pi-banner" hidden></div>
         <form id="pi-form" class="pi-form" autocomplete="off">
           <input type="hidden" id="pi-edit-id" value="">
@@ -3240,7 +3241,9 @@ function escapeAttribute(value) {
             <button id="pi-save" type="submit">Add Product</button>
             <button id="pi-cancel" type="button" class="pi-secondary" hidden>Cancel edit</button>
             <span class="pi-spacer"></span>
-            <button id="pi-export" type="button" class="pi-secondary" title="导出 Active 商品为 products.csv 兼容格式(给 Hermes)">Export Active (Hermes products.csv)</button>
+            <button id="pi-import" type="button" class="pi-secondary" title="从之前导出的 CSV 导入商品(换电脑/恢复用)">Import Products</button>
+            <button id="pi-export" type="button" class="pi-secondary" title="导出 Active 商品为 Hermes 可直接读取的 CSV">Export Active Products</button>
+            <input id="pi-import-file" type="file" accept=".csv,text/csv" hidden>
           </div>
           <div id="pi-msg" class="pi-msg"></div>
         </form>
@@ -3265,6 +3268,10 @@ function escapeAttribute(value) {
       .pi-sub{font-size:12px;color:#8a7350;font-weight:400;margin-left:6px}
       .pi-x{background:none;border:0;font-size:18px;cursor:pointer;color:#735632}
       .pi-banner{background:#fbe9c8;border:1px solid #e3b35a;color:#7a4d11;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px}
+      .pi-stats{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+      .pi-stat{flex:1;min-width:120px;background:#f3e8cf;border:1px solid #e3d3ab;border-radius:10px;padding:8px 12px}
+      .pi-stat .pi-stat-n{font-size:22px;font-weight:700;color:#7a4d11;line-height:1.1}
+      .pi-stat .pi-stat-l{font-size:11px;color:#8a7350;text-transform:uppercase;letter-spacing:.03em}
       .pi-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
       .pi-field{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#6b5733}
       .pi-col2{grid-column:1 / span 2}
@@ -3373,6 +3380,19 @@ function escapeAttribute(value) {
           btn('Delete',function(){del(p.id);});
           tb.appendChild(tr);
         });
+        renderStats();
+      }
+
+      function renderStats(){
+        var box=$('pi-stats');if(!box)return;
+        var ps=products();
+        var active=ps.filter(function(p){return (p.status||'').toLowerCase()==='active';}).length;
+        var ignored=ps.filter(function(p){return (p.status||'').toLowerCase()==='ignore';}).length;
+        var totalM=merchants().filter(function(m){return m.status==='active';}).length;
+        var cells=[['Active Products',active],['Ignored Products',ignored],['Total Products',ps.length],['Total Merchants',totalM]];
+        box.innerHTML=cells.map(function(c){
+          return '<div class="pi-stat"><div class="pi-stat-n">'+c[1]+'</div><div class="pi-stat-l">'+c[0]+'</div></div>';
+        }).join('');
       }
 
       function clearForm(){
@@ -3401,8 +3421,9 @@ function escapeAttribute(value) {
       function submit(e){
         e.preventDefault();
         var url=$('pi-url').value.trim(),model=$('pi-model').value.trim();
-        if(!url||!model){setMsg('Shopee URL 和 Model Name 必填。',false);return;}
-        var merchant=$('pi-merchant').value;var parsed=parseShopee(url);
+        var merchant=($('pi-merchant').value||'').trim();
+        if(!url||!model||!merchant){setMsg('Shopee URL、Model Name、Merchant 都是必填,缺一不保存。',false);return;}
+        var parsed=parseShopee(url);
         var itemId=parsed?parsed.itemId:'';var shopId=parsed?parsed.shopId:'';
         var editId=$('pi-edit-id').value;
         var dup=dedup(merchant,itemId,url,editId);
@@ -3474,21 +3495,68 @@ function escapeAttribute(value) {
         fillMerchantSelect($('pi-merchant'));renderMerchantList();renderList();
       }
 
-      // 导出 status=Active 的商品为 config/products.csv 兼容 CSV(给 Hermes 用,见 src/intake-products.mjs)
+      // 导出/导入的自描述列,Hermes 侧 src/intake-products.mjs 直接读取(见该文件 product-intake 表头分支)。
+      var EXPORT_HEADER=['merchant','item_id','shop_id','model_name','ram','storage','category','shopee_url','status'];
       function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+      // 仅导出 status=Active 的商品。
       function exportActive(){
-        var header=['our_product','our_price','competitor','store_url','keyword','product_url','variant','status','last_confirmed'];
         var active=products().filter(function(p){return (p.status||'').toLowerCase()==='active';});
         if(!active.length){setMsg('没有 Active 商品可导出。',false);return;}
-        var lines=[header.join(',')];
+        var lines=[EXPORT_HEADER.join(',')];
         active.forEach(function(p){
-          lines.push([p.model_name,0,p.merchant_name,'',p.model_name,p.shopee_url,
-            [p.ram,p.storage].filter(Boolean).join(' '),'active',today()].map(csvCell).join(','));
+          lines.push([p.merchant_name,p.item_id||'',p.shop_id||'',p.model_name,p.ram||'',p.storage||'',
+            p.category||'',p.shopee_url,'Active'].map(csvCell).join(','));
         });
         var blob=new Blob([lines.join('\n')+'\n'],{type:'text/csv'});
         var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='product-intake.csv';
         document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
-        setMsg('已导出 '+active.length+' 个 Active 商品 → product-intake.csv(放到 Hermes config/ 下,Phase 2 接入即抓)。',true);
+        setMsg('已导出 '+active.length+' 个 Active 商品 → product-intake.csv(可直接放到 Hermes config/ 下)。',true);
+      }
+
+      // 极简 CSV 解析(支持引号转义),返回二维数组。
+      function parseCsv(text){
+        var rows=[],cell='',row=[],q=false;text=String(text||'');
+        for(var i=0;i<text.length;i++){var c=text[i];
+          if(q){ if(c==='"'&&text[i+1]==='"'){cell+='"';i++;} else if(c==='"'){q=false;} else {cell+=c;} continue; }
+          if(c==='"')q=true; else if(c===','){row.push(cell);cell='';}
+          else if(c==='\n'){row.push(cell);rows.push(row);row=[];cell='';}
+          else if(c!=='\r')cell+=c;
+        }
+        if(cell!==''||row.length){row.push(cell);rows.push(row);}
+        return rows;
+      }
+      // 从导出的 CSV 导入商品(换电脑/恢复)。按 merchant+item_id(无则 +url) 判重,跳过已存在;
+      // 未登记的 merchant 自动补进 registry(competitor)。
+      function importProducts(text){
+        var rows=parseCsv(text).filter(function(r){return r.some(function(c){return String(c||'').trim();});});
+        if(!rows.length){setMsg('CSV 是空的,没导入。',false);return;}
+        var head=rows[0].map(function(c){return String(c||'').trim().toLowerCase();});
+        var hasHeader=head.indexOf('shopee_url')>=0||head.indexOf('merchant')>=0;
+        var cols=hasHeader?head:EXPORT_HEADER;
+        var body=hasHeader?rows.slice(1):rows;
+        function col(r,name){var i=cols.indexOf(name);return i>=0?String(r[i]||'').trim():'';}
+        var list=products(),reg=merchants(),t=nowISO(),added=0,skipped=0,t0=t;
+        body.forEach(function(r){
+          var url=col(r,'shopee_url')||col(r,'product_url');
+          var merchant=col(r,'merchant')||col(r,'competitor');
+          var model=col(r,'model_name')||col(r,'our_product');
+          if(!url||!model||!merchant){skipped++;return;}
+          var parsed=parseShopee(url);var itemId=col(r,'item_id')||(parsed?parsed.itemId:'');
+          var shopId=col(r,'shop_id')||(parsed?parsed.shopId:'');
+          if(dedup(merchant,itemId,url,null)){skipped++;return;}
+          if(!reg.some(function(m){return m.merchant_name.toLowerCase()===merchant.toLowerCase();})){
+            reg.push({id:uid(),merchant_name:merchant,merchant_type:'competitor',platform:'Shopee',status:'active',is_default:false,created_at:t,updated_at:t});
+          }
+          list.push({id:uid(),shopee_url:url,item_id:itemId,shop_id:shopId,merchant_name:merchant,model_name:model,
+            ram:col(r,'ram'),storage:col(r,'storage'),category:col(r,'category')||'Phone',
+            status:col(r,'status')||'Active',notes:'',review_needed:!itemId,
+            created_at:t0,updated_at:t0,last_checked_at:'',last_scrape_status:'',last_error:''});
+          added++;
+        });
+        save(PI_MERCHANTS,reg);save(PI_PRODUCTS,list);
+        fillMerchantSelect($('pi-merchant'));renderList();
+        var box=$('pi-merchant-manage');if(box&&!box.hidden)renderMerchantList();
+        setMsg('导入完成:新增 '+added+' 个,跳过 '+skipped+' 个(重复或缺字段)。',true);
       }
 
       function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
@@ -3504,6 +3572,12 @@ function escapeAttribute(value) {
           var box=$('pi-merchant-manage');box.hidden=!box.hidden;if(!box.hidden)renderMerchantList();
         });
         $('pi-export').addEventListener('click',exportActive);
+        $('pi-import').addEventListener('click',function(){$('pi-import-file').click();});
+        $('pi-import-file').addEventListener('change',function(e){
+          var f=e.target.files&&e.target.files[0];if(!f)return;
+          var r=new FileReader();r.onload=function(){try{importProducts(String(r.result||''));}catch(err){setMsg('导入失败:'+err.message,false);}};
+          r.readAsText(f);e.target.value=''; // 清空以便重复导入同一文件
+        });
         $('pi-overlay').addEventListener('click',function(e){if(e.target===$('pi-overlay'))close();});
         seedMerchants();
         fillMerchantSelect($('pi-merchant')); // 页面加载即填充,不等点开浮层

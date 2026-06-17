@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { intakeRowsFromCsv, loadIntakeProducts, INTAKE_CSV_HEADER } from '../src/intake-products.mjs';
+import {
+  intakeRowsFromCsv, loadIntakeProducts, INTAKE_CSV_HEADER, PRODUCT_INTAKE_CSV_HEADER,
+} from '../src/intake-products.mjs';
 
 const HEADER = INTAKE_CSV_HEADER.join(',');
 
@@ -64,7 +66,7 @@ const SELECT_IDS = new Set(['pi-merchant', 'pi-category', 'pi-status']);
 
 function makeEl(tag) {
   const el = {
-    tag, children: [], listeners: {}, onclick: null, parent: null,
+    tag, children: [], listeners: {}, onclick: null, parent: null, files: null,
     textContent: '', className: '', hidden: false, type: '', href: '', download: '',
     _value: '', _innerHTML: '', selectedIndex: -1,
     appendChild(c) {
@@ -75,9 +77,11 @@ function makeEl(tag) {
     removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); return c; },
     remove() { if (this.parent) this.parent.removeChild(this); },
     addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); },
-    setAttribute() {}, click() {
+    setAttribute() {},
+    dispatch(ev, extra) { (this.listeners[ev] || []).forEach((f) => f(Object.assign({ target: this }, extra))); },
+    click() {
       if (typeof this.onclick === 'function') this.onclick({ target: this });
-      (this.listeners.click || []).forEach((f) => f({ target: this }));
+      this.dispatch('click');
     },
     get value() {
       if (this.tag !== 'select') return this._value;
@@ -124,8 +128,18 @@ function makeEnv() {
   ['pi-merchant-manage', 'pi-overlay', 'pi-review-banner', 'pi-cancel'].forEach((id) => {
     byId[id] = makeEl(SELECT_IDS.has(id) ? 'select' : 'div'); byId[id].hidden = true;
   });
+  // <select> options that exist in the HTML markup (the IIFE never builds these).
+  [['pi-status', ['Active', 'Testing', 'Ignore']], ['pi-category', ['Phone', 'Tablet', 'Watch', 'Buds']]]
+    .forEach(([id, opts]) => { const el = document.getElementById(id); opts.forEach((v) => { const o = makeEl('option'); o.value = v; o.textContent = v; el.appendChild(o); }); });
   let confirmImpl = () => true, promptImpl = () => null;
   const alerts = [];
+  let lastBlobText = null;
+  function BlobStub(parts) { lastBlobText = Array.isArray(parts) ? parts.join('') : String(parts == null ? '' : parts); }
+  function FileReaderStub() { this.onload = null; this.result = ''; }
+  FileReaderStub.prototype.readAsText = function readAsText(file) {
+    this.result = file && file.__text != null ? file.__text : '';
+    if (this.onload) this.onload({ target: this });
+  };
   const code = (() => {
     const html = fs.readFileSync(new URL('../d3-price/index.html', import.meta.url), 'utf8');
     const m = html.match(/<script>\s*\(function\(\)\{[\s\S]*?\}\)\(\);\s*<\/script>/g);
@@ -133,10 +147,10 @@ function makeEnv() {
     return m[m.length - 1].replace(/^<script>/, '').replace(/<\/script>$/, '');
   })();
   const cryptoStub = { randomUUID: (() => { let n = 0; return () => `uid-${++n}`; })() };
-  const fn = new Function('document', 'localStorage', 'crypto', 'confirm', 'alert', 'prompt', 'Blob', 'URL', 'console', code);
+  const fn = new Function('document', 'localStorage', 'crypto', 'confirm', 'alert', 'prompt', 'Blob', 'URL', 'FileReader', 'console', code);
   fn(document, localStorage, cryptoStub,
     (...a) => confirmImpl(...a), (m) => alerts.push(m), (...a) => promptImpl(...a),
-    function () {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, console);
+    BlobStub, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, FileReaderStub, console);
   return {
     byId, alerts,
     setConfirm: (f) => { confirmImpl = f; },
@@ -169,6 +183,21 @@ function makeEnv() {
         }
       }
       return null;
+    },
+    openModal: () => document.getElementById('pi-launch').click(),
+    // Fill the add-product form and submit it (mirrors a user clicking "Add Product").
+    addProduct: ({ url = '', model = '', merchant = '', ram = '', storage = '' }) => {
+      document.getElementById('pi-url').value = url; document.getElementById('pi-model').value = model;
+      document.getElementById('pi-ram').value = ram; document.getElementById('pi-storage').value = storage;
+      if (merchant) document.getElementById('pi-merchant').value = merchant;
+      document.getElementById('pi-form').dispatch('submit', { preventDefault() {} });
+    },
+    msg: () => document.getElementById('pi-msg').textContent,
+    statsText: () => String(document.getElementById('pi-stats').innerHTML),
+    exportCsv: () => { lastBlobText = null; document.getElementById('pi-export').click(); return lastBlobText; },
+    importCsv: (text) => {
+      const f = document.getElementById('pi-import-file'); f.files = [{ __text: text }];
+      f.dispatch('change', { target: f });
     },
   };
 }
@@ -246,4 +275,97 @@ test('rename cascades to product_intake merchant_name', () => {
   assert.ok(env.dropdownNames().includes('NEWNAME'), 'dropdown shows new name');
   assert.ok(!env.dropdownNames().includes('OLDNAME'), 'old name gone from dropdown');
   assert.equal(env.products()[0].merchant_name, 'NEWNAME', 'product cascaded to new name');
+});
+
+// ── Product CRUD / validation / URL parser / export / import / stats ─────────
+
+test('add product requires URL, Model, and Merchant (nothing saved if missing)', () => {
+  const env = makeEnv();
+  env.addProduct({ url: '', model: 'Galaxy S26', merchant: 'D3' });          // no url
+  assert.equal(env.products().length, 0);
+  env.addProduct({ url: 'https://shopee.com.my/x-i.1.2', model: '', merchant: 'D3' }); // no model
+  assert.equal(env.products().length, 0);
+  // merchant blank: clear the select so value is empty
+  env.byId['pi-merchant'].innerHTML = '';
+  env.addProduct({ url: 'https://shopee.com.my/x-i.1.2', model: 'Galaxy S26' });
+  assert.equal(env.products().length, 0);
+  assert.match(env.msg(), /必填/);
+});
+
+test('Shopee URL parser handles i.<shop>.<item> and product/<shop>/<item>', () => {
+  const env = makeEnv();
+  env.addProduct({ url: 'https://shopee.com.my/Samsung-Galaxy-i.123456.789012', model: 'Galaxy S26', merchant: 'D3' });
+  env.addProduct({ url: 'https://shopee.com.my/product/123456/789013', model: 'Galaxy A56', merchant: 'D3' });
+  const ps = env.products();
+  assert.equal(ps.length, 2);
+  const byModel = Object.fromEntries(ps.map((p) => [p.model_name, p]));
+  assert.equal(byModel['Galaxy S26'].shop_id, '123456');
+  assert.equal(byModel['Galaxy S26'].item_id, '789012');
+  assert.equal(byModel['Galaxy A56'].shop_id, '123456');
+  assert.equal(byModel['Galaxy A56'].item_id, '789013');
+});
+
+test('Export Active Products emits the v2 header and only Active rows', () => {
+  const env = makeEnv();
+  env.setProducts([
+    { id: 'a', merchant_name: 'D3', item_id: '789012', shop_id: '123456', model_name: 'Galaxy S26', ram: '12GB', storage: '256GB', category: 'Phone', shopee_url: 'https://shopee.com.my/x-i.123456.789012', status: 'Active' },
+    { id: 'b', merchant_name: 'TAC', item_id: '11', shop_id: '22', model_name: 'Watch S5', ram: '', storage: '', category: 'Watch', shopee_url: 'https://shopee.com.my/y-i.22.11', status: 'Ignore' },
+  ]);
+  const csv = env.exportCsv();
+  const lines = csv.trim().split('\n');
+  assert.equal(lines[0], 'merchant,item_id,shop_id,model_name,ram,storage,category,shopee_url,status');
+  assert.equal(lines[0], PRODUCT_INTAKE_CSV_HEADER.join(','));
+  assert.equal(lines.length, 2, 'header + 1 active row (ignored row excluded)');
+  assert.equal(lines[1], 'D3,789012,123456,Galaxy S26,12GB,256GB,Phone,https://shopee.com.my/x-i.123456.789012,Active');
+});
+
+test('Export → Import round-trips products and auto-registers unknown merchants', () => {
+  const a = makeEnv();
+  a.setProducts([
+    { id: 'a', merchant_name: 'NEWSHOP', item_id: '789012', shop_id: '123456', model_name: 'Galaxy S26', ram: '12GB', storage: '256GB', category: 'Phone', shopee_url: 'https://shopee.com.my/x-i.123456.789012', status: 'Active' },
+  ]);
+  const csv = a.exportCsv();
+  // fresh machine
+  const b = makeEnv();
+  assert.equal(b.products().length, 0);
+  assert.ok(!b.dropdownNames().includes('NEWSHOP'));
+  b.importCsv(csv);
+  assert.equal(b.products().length, 1, 'product imported');
+  const p = b.products()[0];
+  assert.equal(p.merchant_name, 'NEWSHOP');
+  assert.equal(p.item_id, '789012');
+  assert.equal(p.shop_id, '123456');
+  assert.ok(b.dropdownNames().includes('NEWSHOP'), 'unknown merchant auto-registered into dropdown');
+  // re-import same CSV → all skipped (dedup)
+  b.importCsv(csv);
+  assert.equal(b.products().length, 1, 'duplicate import skipped');
+});
+
+test('statistics card counts active / ignored / total products and merchants', () => {
+  const env = makeEnv();
+  env.setProducts([
+    { id: '1', merchant_name: 'D3', model_name: 'A', status: 'Active' },
+    { id: '2', merchant_name: 'D3', model_name: 'B', status: 'Active' },
+    { id: '3', merchant_name: 'D3', model_name: 'C', status: 'Ignore' },
+  ]);
+  env.openModal(); // triggers renderList → renderStats
+  const s = env.statsText();
+  assert.match(s, /<div class="pi-stat-n">2<\/div><div class="pi-stat-l">Active Products/);
+  assert.match(s, /<div class="pi-stat-n">1<\/div><div class="pi-stat-l">Ignored Products/);
+  assert.match(s, /<div class="pi-stat-n">3<\/div><div class="pi-stat-l">Total Products/);
+  assert.match(s, /<div class="pi-stat-n">4<\/div><div class="pi-stat-l">Total Merchants/);
+});
+
+// ── src/intake-products.mjs: Phase-2 reader understands the v2 export ────────
+
+test('intakeRowsFromCsv maps the v2 export header to loadProducts shape', () => {
+  const csv = `${PRODUCT_INTAKE_CSV_HEADER.join(',')}\n`
+    + 'Deal Direct,789012,123456,Galaxy S26,12GB,256GB,Phone,https://shopee.com.my/x-i.123456.789012,Active\n'
+    + 'TAC,11,22,Watch S5,,,Watch,https://shopee.com.my/y-i.22.11,Ignore\n';
+  const rows = intakeRowsFromCsv(csv);
+  assert.equal(rows.length, 1, 'only Active row kept');
+  assert.equal(rows[0].our_product, 'Galaxy S26');
+  assert.equal(rows[0].competitor, 'Deal Direct');
+  assert.equal(rows[0].product_url, 'https://shopee.com.my/x-i.123456.789012');
+  assert.equal(rows[0].variant, '12GB 256GB');
 });

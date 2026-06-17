@@ -1,9 +1,9 @@
 // Product Intake — Hermes 接入接口（Phase 1：inert，未接入 sweep）。
 //
 // 背景：网页「Product Intake」页面手动新增要监控的新商品（存浏览器 localStorage），
-// 通过页面上的「Export Active (Hermes products.csv)」按钮导出成一个与 config/products.csv
-// 同表头的 CSV（默认文件名 product-intake.csv）。把它放到 Hermes 机器的 config/ 下，
-// 本模块即可把里面 status=active 的商品读成与 loadProducts() 同形状的行对象。
+// 通过页面上的「Export Active Products」按钮导出成 product-intake.csv。把它放到 Hermes 机器的
+// config/ 下，本模块即可把里面 status=Active 的商品读成与 loadProducts() 同形状的行对象。
+// 同时兼容旧的 config/products.csv 同表头格式（intakeRowsFromCsv 按表头自动判别）。
 //
 // ⚠️ Phase 1 不接入现有 sweep：本文件不被 runOnce/hermes 调用，纯函数 + 测试，零副作用。
 // Phase 2 接入只需在抓取前做一次合并（见文件底部 wireIntoSweep 注释），失败只影响新商品。
@@ -15,6 +15,27 @@ export const INTAKE_CSV_HEADER = [
   'our_product', 'our_price', 'competitor', 'store_url',
   'keyword', 'product_url', 'variant', 'status', 'last_confirmed',
 ];
+
+// Product Intake 页面「Export Active Products」导出的自描述列（v2 格式）。
+// 这套更贴近 localStorage 字段，是给 Leon 看的导出/导入格式；本模块也直接读它。
+export const PRODUCT_INTAKE_CSV_HEADER = [
+  'merchant', 'item_id', 'shop_id', 'model_name', 'ram', 'storage', 'category', 'shopee_url', 'status',
+];
+
+// 把 product-intake v2 格式的一行映射成 loadProducts() 同形状的行对象。
+function mapIntakeV2Row(row) {
+  return {
+    our_product: row.model_name,
+    our_price: '0',
+    competitor: row.merchant,
+    store_url: '',
+    keyword: row.model_name,
+    product_url: row.shopee_url,
+    variant: [row.ram, row.storage].filter(Boolean).join(' '),
+    status: row.status,
+    last_confirmed: '',
+  };
+}
 
 // 轻量 CSV 解析（与 lib-hermes 同语义；自带一份避免耦合/改坏现有模块）。
 export function parseIntakeCsv(text) {
@@ -45,6 +66,17 @@ export function intakeRowsFromCsv(text) {
   const rows = parseIntakeCsv(String(text || ''));
   if (!rows.length) return [];
   const header = rows[0].map((c) => String(c || '').trim());
+
+  // v2 格式（页面 Export Active Products）：表头含 shopee_url/merchant → 映射到 loadProducts 形状。
+  if (header.includes('shopee_url') || header.includes('merchant')) {
+    return rows.slice(1)
+      .filter((row) => row.some((cell) => String(cell || '').trim()))
+      .map((row) => Object.fromEntries(PRODUCT_INTAKE_CSV_HEADER.map((key, idx) => [key, String(row[idx] || '').trim()])))
+      .map(mapIntakeV2Row)
+      .filter((row) => row.product_url && (!row.status || row.status.toLowerCase() === 'active'));
+  }
+
+  // 旧格式：与 config/products.csv 同表头（缺表头时按 INTAKE_CSV_HEADER 兜底）。
   const useHeader = header.includes('product_url') ? header : INTAKE_CSV_HEADER;
   const body = header.includes('product_url') ? rows.slice(1) : rows;
   return body
