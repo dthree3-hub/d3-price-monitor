@@ -24,7 +24,14 @@ const MODEL_PATTERNS = [
     return `S${num}${suffix}`;
   } },
   // Watch 已移出通用 lossy 表 → 见 resolveWatchModel（多家族同串会 drop，避免 standalone 误分类）。
-  { regex: /\bBuds\s*(\d+\s*FE|\d+\s*Pro|\d+|Core)\b/i, map: (_, model) => `Buds ${String(model).replace(/\s+/g, ' ').trim()}` },
+  { regex: /\bBuds\s*(\d+\s*FE|\d+\s*Pro|\d+|Core)\b/i, map: (_, model) => {
+    // 规整大小写：卖家可能写 BUDS CORE / BUDS4 PRO → 统一成 canonical Core / Pro（FE 保持大写），避免大小写重复桶。
+    const t = String(model).replace(/\s+/g, ' ').trim()
+      .replace(/\bfe\b/i, 'FE')
+      .replace(/\bpro\b/i, 'Pro')
+      .replace(/\bcore\b/i, 'Core');
+    return `Buds ${t}`;
+  } },
   { regex: /\bFit\s*(\d+)\b/i, map: (_, num) => `Fit ${num}` },
 ];
 
@@ -43,7 +50,7 @@ function normalizeSpaces(text) {
 // 卖家用极简写：W8/W6 = Watch 8/6、W8 CLASSIC = Watch 8 Classic、W ULRA = Watch Ultra(把 ULTRA 拼成 ULRA)。
 // 连接性：BH = 蓝牙(BT)、LTE = LTE；尺寸 40/44/46MM。门控正则要求款式名以 "W6/W8/W ULRA" 开头，
 // 手机(S/A/Z)、平板(Tab/S1x)绝不会以此开头 → 只命中手表，不影响其它 parser 路径。
-// Watch 6 / Watch Ultra 2024 自家店不卖、无可比项 → 给干净标签但不进 master（Leon 已确认）。
+// Watch 6 / Watch Ultra 2024 自家店不卖、无可比项 → 直接 drop（返回 null），不进 Dashboard（Leon 2026-06-16 确认）。
 const TAC_WATCH_SHORTHAND_RE = /^W\s*(?:6|8|ULRA|ULTRA)\b/i;
 
 function tacWatchColor(name) {
@@ -66,13 +73,14 @@ function resolveTacWatchShorthand(name) {
   let model = '';
   if (/^W\s*(?:ULRA|ULTRA)\b/i.test(name)) {
     const year = (s.match(/(?<![0-9])(2024|2025)(?![0-9])/) || [])[1] || '2025'; // 年份可能与颜色粘连(2024WHITE)
+    if (year === '2024') return null; // 自家不卖 Watch Ultra 2024 → drop
     model = `Watch Ultra ${year}`; // Ultra canonical 不带 BT/LTE 后缀(对齐 master L705)
   } else if (/^W\s*8\s*CLASSIC\b/i.test(name)) {
     model = `Watch 8 Classic 46mm ${net}`; // Classic 仅 46mm
   } else if (/^W\s*8\b/i.test(name)) {
     model = size ? `Watch 8 ${size}mm ${net}` : `Watch 8 ${net}`;
   } else if (/^W\s*6\b/i.test(name)) {
-    model = size ? `Watch 6 ${size}mm ${net}` : `Watch 6 ${net}`;
+    return null; // 自家不卖 Watch 6 → drop
   }
   return model || null;
 }
