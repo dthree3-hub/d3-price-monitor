@@ -3562,12 +3562,8 @@ function escapeAttribute(value) {
       function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
       function close(){$('pi-overlay').hidden=true;}
 
-      // 内部入口保护:仅当 URL 带 ?intake=1 才显示 Product Intake;普通顾客看不到。
-      function intakeEnabled(){try{return /[?&]intake=1(?:&|$)/.test(String(location.search||''));}catch(e){return false;}}
       function init(){
-        var launch=$('pi-launch');
-        if(!intakeEnabled()){if(launch)launch.hidden=true;return;} // 无 ?intake=1 → 隐藏入口、不挂任何事件
-        launch.addEventListener('click',open);
+        $('pi-launch').addEventListener('click',open);
         $('pi-close').addEventListener('click',close);
         $('pi-form').addEventListener('submit',submit);
         $('pi-cancel').addEventListener('click',clearForm);
