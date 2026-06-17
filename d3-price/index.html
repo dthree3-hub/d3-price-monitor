@@ -3206,5 +3206,247 @@ function escapeAttribute(value) {
       }
     })();
     </script>
+    <!-- ===================== Product Intake (内部用 · Phase 1 · localStorage) ===================== -->
+    <button id="pi-launch" type="button" title="内部：手动新增要监控的商品">🛠 Product Intake</button>
+    <div id="pi-overlay" hidden>
+      <div class="pi-modal">
+        <div class="pi-head">
+          <h2>Product Intake <span class="pi-sub">内部 · 手动新增监控商品(Phase 1：存本机浏览器)</span></h2>
+          <button id="pi-close" type="button" class="pi-x" title="关闭">✕</button>
+        </div>
+        <div id="pi-review-banner" class="pi-banner" hidden></div>
+        <form id="pi-form" class="pi-form" autocomplete="off">
+          <input type="hidden" id="pi-edit-id" value="">
+          <label class="pi-field pi-col2"><span>Shopee product URL *</span>
+            <input id="pi-url" type="text" placeholder="https://shopee.com.my/...-i.<shopId>.<itemId>..." required></label>
+          <label class="pi-field"><span>Model Name *</span>
+            <input id="pi-model" type="text" placeholder="Galaxy S26 / Galaxy A56 / Watch S5" required></label>
+          <label class="pi-field"><span>RAM</span>
+            <input id="pi-ram" type="text" placeholder="8GB / 12GB(可空)"></label>
+          <label class="pi-field"><span>Storage</span>
+            <input id="pi-storage" type="text" placeholder="128GB / 256GB(可空)"></label>
+          <label class="pi-field"><span>Category</span>
+            <select id="pi-category"><option>Phone</option><option>Tablet</option><option>Watch</option><option>Buds</option></select></label>
+          <label class="pi-field"><span>Merchant</span>
+            <span class="pi-merchant-row"><select id="pi-merchant"></select>
+            <button id="pi-add-merchant" type="button" class="pi-mini">+ Add Merchant</button></span></label>
+          <label class="pi-field"><span>Status</span>
+            <select id="pi-status"><option>Active</option><option>Testing</option><option>Ignore</option></select></label>
+          <label class="pi-field pi-col2"><span>Notes</span>
+            <textarea id="pi-notes" rows="2" placeholder="可空"></textarea></label>
+          <div class="pi-actions">
+            <button id="pi-save" type="submit">Add Product</button>
+            <button id="pi-cancel" type="button" class="pi-secondary" hidden>Cancel edit</button>
+            <span class="pi-spacer"></span>
+            <button id="pi-export" type="button" class="pi-secondary" title="导出 Active 商品为 products.csv 兼容格式(给 Hermes)">Export Active (Hermes products.csv)</button>
+          </div>
+          <div id="pi-msg" class="pi-msg"></div>
+        </form>
+        <div class="pi-list-wrap">
+          <table class="pi-table">
+            <thead><tr>
+              <th>Merchant</th><th>Model</th><th>RAM / Storage</th><th>Category</th><th>Shopee URL</th>
+              <th>Status</th><th>Last Checked</th><th>Last Scrape</th><th>Last Error</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="pi-tbody"></tbody>
+          </table>
+          <div id="pi-empty" class="pi-empty">还没有手动新增的商品。</div>
+        </div>
+      </div>
+    </div>
+    <style>
+      #pi-launch{position:fixed;right:14px;bottom:14px;z-index:99990;background:#3a2f1c;color:#f3e8cf;border:0;border-radius:10px;padding:9px 14px;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+      #pi-overlay{position:fixed;inset:0;z-index:99991;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
+      .pi-modal{background:#fbf6ec;width:min(1100px,96vw);border-radius:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif;color:#3a2f1c}
+      .pi-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+      .pi-head h2{margin:0;font-size:19px}
+      .pi-sub{font-size:12px;color:#8a7350;font-weight:400;margin-left:6px}
+      .pi-x{background:none;border:0;font-size:18px;cursor:pointer;color:#735632}
+      .pi-banner{background:#fbe9c8;border:1px solid #e3b35a;color:#7a4d11;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px}
+      .pi-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+      .pi-field{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#6b5733}
+      .pi-col2{grid-column:1 / span 2}
+      .pi-field input,.pi-field select,.pi-field textarea{padding:8px;border:1px solid #d7c19a;border-radius:8px;font-size:14px;background:#fff;color:#2c2412}
+      .pi-merchant-row{display:flex;gap:6px}
+      .pi-merchant-row select{flex:1}
+      .pi-mini{border:1px solid #c9a35a;background:#f1e3c4;border-radius:8px;padding:0 10px;cursor:pointer;font-size:12px;white-space:nowrap}
+      .pi-actions{grid-column:1 / span 2;display:flex;align-items:center;gap:8px;margin-top:4px}
+      .pi-spacer{flex:1}
+      .pi-actions button{border:0;border-radius:9px;padding:9px 14px;font-size:13px;cursor:pointer;background:#9a6b16;color:#fff}
+      .pi-secondary{background:#e7d8b6 !important;color:#4a3a18 !important}
+      .pi-msg{grid-column:1 / span 2;font-size:13px;min-height:16px}
+      .pi-msg.ok{color:#2f7a3a}.pi-msg.err{color:#9e3d2c}
+      .pi-list-wrap{margin-top:14px;overflow:auto}
+      .pi-table{width:100%;border-collapse:collapse;font-size:12px}
+      .pi-table th,.pi-table td{border-bottom:1px solid #ead9b6;padding:6px 8px;text-align:left;vertical-align:top}
+      .pi-table th{color:#8a7350;font-weight:600;white-space:nowrap}
+      .pi-url{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
+      .pi-badge{display:inline-block;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600}
+      .pi-st-active{background:#d8efd8;color:#2f7a3a}.pi-st-testing{background:#fbe9c8;color:#7a4d11}.pi-st-ignore{background:#eadfce;color:#8a7350}
+      .pi-review{background:#f6d6cf;color:#9e3d2c}
+      .pi-rowbtn{border:1px solid #d7c19a;background:#fff;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:3px}
+      .pi-empty{color:#8a7350;font-size:13px;padding:10px 4px}
+    </style>
+    <script>
+    (function(){
+      var PI_PRODUCTS='d3_product_intake', PI_MERCHANTS='d3_merchant_registry';
+      function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
+      function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+      function uid(){try{return crypto.randomUUID();}catch(e){return 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);}}
+      function nowISO(){return new Date().toISOString();}
+      function today(){return new Date().toISOString().slice(0,10);}
+      function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+      function parseShopee(url){var t=String(url||'').trim();var m=t.match(/i\.(\d+)\.(\d+)/)||t.match(/product\/(\d+)\/(\d+)/);return m?{shopId:m[1],itemId:m[2]}:null;}
+
+      function seedMerchants(){
+        var m=load(PI_MERCHANTS,null);
+        if(m&&m.length)return m;
+        var t=nowISO();
+        m=[['D3','our_store'],['Deal Direct','competitor'],['TAC','competitor'],['Spray','competitor']].map(function(x){
+          return {id:uid(),merchant_name:x[0],merchant_type:x[1],platform:'Shopee',status:'active',created_at:t,updated_at:t};});
+        save(PI_MERCHANTS,m);return m;
+      }
+      function merchants(){return load(PI_MERCHANTS,[]);}
+      function products(){return load(PI_PRODUCTS,[]);}
+
+      var $=function(id){return document.getElementById(id);};
+      function fillMerchantSelect(sel){
+        var cur=sel.value;sel.innerHTML='';
+        merchants().filter(function(m){return m.status==='active';}).forEach(function(m){
+          var o=document.createElement('option');o.value=m.merchant_name;o.textContent=m.merchant_name+(m.merchant_type==='our_store'?' (us)':'');sel.appendChild(o);});
+        if(cur)sel.value=cur;
+      }
+      function setMsg(t,ok){var e=$('pi-msg');e.textContent=t||'';e.className='pi-msg '+(t?(ok?'ok':'err'):'');}
+
+      function dedup(merchant,itemId,url,excludeId){
+        return products().find(function(p){
+          if(p.id===excludeId)return false;
+          if(p.merchant_name!==merchant)return false;
+          if(itemId)return p.item_id===itemId;          // 有 itemId：按 merchant+itemId 判重
+          return p.shopee_url===url;                    // 解析不到 itemId：按 merchant+url 兜底判重
+        });
+      }
+
+      function renderList(){
+        var rows=products();var tb=$('pi-tbody');tb.innerHTML='';
+        $('pi-empty').hidden=rows.length>0;
+        var review=rows.filter(function(p){return p.review_needed;}).length;
+        var b=$('pi-review-banner');
+        if(review){b.hidden=false;b.textContent='⚠ '+review+' 个商品需要人工检查(Review Needed)：Shopee URL 解析不到 itemId,已保存但请确认链接。';}
+        else b.hidden=true;
+        rows.slice().sort(function(a,b){return (b.created_at||'').localeCompare(a.created_at||'');}).forEach(function(p){
+          var st=(p.status||'').toLowerCase();
+          var stCls=st==='active'?'pi-st-active':st==='testing'?'pi-st-testing':'pi-st-ignore';
+          var tr=document.createElement('tr');
+          tr.innerHTML=
+            '<td>'+esc(p.merchant_name)+'</td>'+
+            '<td>'+esc(p.model_name)+(p.review_needed?' <span class="pi-badge pi-review">Review</span>':'')+'</td>'+
+            '<td>'+esc([p.ram,p.storage].filter(Boolean).join(' / ')||'—')+'</td>'+
+            '<td>'+esc(p.category||'—')+'</td>'+
+            '<td><a class="pi-url" href="'+esc(p.shopee_url)+'" target="_blank" rel="noopener" title="'+esc(p.shopee_url)+'">'+esc(p.shopee_url)+'</a></td>'+
+            '<td><span class="pi-badge '+stCls+'">'+esc(p.status)+'</span></td>'+
+            '<td>'+esc(p.last_checked_at?p.last_checked_at.slice(0,16).replace('T',' '):'—')+'</td>'+
+            '<td>'+esc(p.last_scrape_status||'—')+'</td>'+
+            '<td>'+esc(p.last_error||'—')+'</td>'+
+            '<td></td>';
+          var act=tr.lastChild;
+          function btn(label,fn){var x=document.createElement('button');x.className='pi-rowbtn';x.textContent=label;x.onclick=fn;act.appendChild(x);}
+          btn('Edit',function(){editInto(p.id);});
+          btn(st==='ignore'?'Enable':'Disable',function(){toggleIgnore(p.id);});
+          btn('Delete',function(){del(p.id);});
+          tb.appendChild(tr);
+        });
+      }
+
+      function clearForm(){
+        $('pi-edit-id').value='';$('pi-url').value='';$('pi-model').value='';$('pi-ram').value='';$('pi-storage').value='';
+        $('pi-category').value='Phone';$('pi-status').value='Active';$('pi-notes').value='';
+        $('pi-save').textContent='Add Product';$('pi-cancel').hidden=true;setMsg('');
+      }
+      function editInto(id){
+        var p=products().find(function(x){return x.id===id;});if(!p)return;
+        $('pi-edit-id').value=p.id;$('pi-url').value=p.shopee_url;$('pi-model').value=p.model_name;
+        $('pi-ram').value=p.ram||'';$('pi-storage').value=p.storage||'';$('pi-category').value=p.category||'Phone';
+        fillMerchantSelect($('pi-merchant'));$('pi-merchant').value=p.merchant_name;$('pi-status').value=p.status||'Active';
+        $('pi-notes').value=p.notes||'';$('pi-save').textContent='Update Product';$('pi-cancel').hidden=false;
+        $('pi-overlay').scrollTop=0;setMsg('编辑中…');
+      }
+      function toggleIgnore(id){
+        var list=products();var p=list.find(function(x){return x.id===id;});if(!p)return;
+        p.status=(p.status||'').toLowerCase()==='ignore'?'Active':'Ignore';p.updated_at=nowISO();
+        save(PI_PRODUCTS,list);renderList();
+      }
+      function del(id){
+        if(!confirm('删除这个商品?(只删本机记录,不影响 D1/现有抓取)'))return;
+        save(PI_PRODUCTS,products().filter(function(x){return x.id!==id;}));renderList();
+      }
+
+      function submit(e){
+        e.preventDefault();
+        var url=$('pi-url').value.trim(),model=$('pi-model').value.trim();
+        if(!url||!model){setMsg('Shopee URL 和 Model Name 必填。',false);return;}
+        var merchant=$('pi-merchant').value;var parsed=parseShopee(url);
+        var itemId=parsed?parsed.itemId:'';var shopId=parsed?parsed.shopId:'';
+        var editId=$('pi-edit-id').value;
+        var dup=dedup(merchant,itemId,url,editId);
+        if(dup){setMsg('已存在：'+merchant+' + '+(itemId||'(此 URL)')+' 已经在列表里了。',false);return;}
+        var list=products();var t=nowISO();
+        if(editId){
+          var p=list.find(function(x){return x.id===editId;});if(!p){setMsg('找不到要编辑的记录。',false);return;}
+          p.shopee_url=url;p.item_id=itemId;p.shop_id=shopId;p.merchant_name=merchant;p.model_name=model;
+          p.ram=$('pi-ram').value.trim();p.storage=$('pi-storage').value.trim();p.category=$('pi-category').value;
+          p.status=$('pi-status').value;p.notes=$('pi-notes').value.trim();p.review_needed=!itemId;p.updated_at=t;
+        }else{
+          list.push({id:uid(),shopee_url:url,item_id:itemId,shop_id:shopId,merchant_name:merchant,model_name:model,
+            ram:$('pi-ram').value.trim(),storage:$('pi-storage').value.trim(),category:$('pi-category').value,
+            status:$('pi-status').value,notes:$('pi-notes').value.trim(),review_needed:!itemId,
+            created_at:t,updated_at:t,last_checked_at:'',last_scrape_status:'',last_error:''});
+        }
+        save(PI_PRODUCTS,list);
+        setMsg((editId?'已更新':'已新增')+(itemId?'':' (解析不到 itemId → 标记 Review Needed)'),true);
+        clearForm();renderList();
+      }
+
+      function addMerchant(){
+        var name=prompt('新增商家名称(对手或自家店):');if(!name)return;name=name.trim();if(!name)return;
+        if(merchants().some(function(m){return m.merchant_name.toLowerCase()===name.toLowerCase();})){alert('该商家已存在。');return;}
+        var type=confirm('这是「我们自家店」吗?\n确定=our_store,取消=competitor')?'our_store':'competitor';
+        var t=nowISO();var list=merchants();
+        list.push({id:uid(),merchant_name:name,merchant_type:type,platform:'Shopee',status:'active',created_at:t,updated_at:t});
+        save(PI_MERCHANTS,list);fillMerchantSelect($('pi-merchant'));$('pi-merchant').value=name;
+      }
+
+      // 导出 status=Active 的商品为 config/products.csv 兼容 CSV(给 Hermes 用,见 src/intake-products.mjs)
+      function csvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+      function exportActive(){
+        var header=['our_product','our_price','competitor','store_url','keyword','product_url','variant','status','last_confirmed'];
+        var active=products().filter(function(p){return (p.status||'').toLowerCase()==='active';});
+        if(!active.length){setMsg('没有 Active 商品可导出。',false);return;}
+        var lines=[header.join(',')];
+        active.forEach(function(p){
+          lines.push([p.model_name,0,p.merchant_name,'',p.model_name,p.shopee_url,
+            [p.ram,p.storage].filter(Boolean).join(' '),'active',today()].map(csvCell).join(','));
+        });
+        var blob=new Blob([lines.join('\n')+'\n'],{type:'text/csv'});
+        var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='product-intake.csv';
+        document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+        setMsg('已导出 '+active.length+' 个 Active 商品 → product-intake.csv(放到 Hermes config/ 下,Phase 2 接入即抓)。',true);
+      }
+
+      function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
+      function close(){$('pi-overlay').hidden=true;}
+
+      document.addEventListener('DOMContentLoaded',function(){
+        $('pi-launch').addEventListener('click',open);
+        $('pi-close').addEventListener('click',close);
+        $('pi-form').addEventListener('submit',submit);
+        $('pi-cancel').addEventListener('click',clearForm);
+        $('pi-add-merchant').addEventListener('click',addMerchant);
+        $('pi-export').addEventListener('click',exportActive);
+        $('pi-overlay').addEventListener('click',function(e){if(e.target===$('pi-overlay'))close();});
+        seedMerchants();
+      });
+    })();
+    </script>
   </body>
 </html>
