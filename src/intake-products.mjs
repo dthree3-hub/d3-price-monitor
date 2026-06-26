@@ -145,6 +145,46 @@ export function loadSweepProducts(baseProducts, { log = () => {}, csvPath } = {}
   return merged;
 }
 
+// 远程 intake：从 Worker GET /api/intake 拉「页面实时推送的 Active 商品镜像」。
+// 返回 loadProducts() 同形状的行数组；URL 未配置/拉取失败 → []（绝不抛，不影响整轮 sweep）。
+// Worker 返回的 products[] 列名与 PRODUCT_INTAKE_CSV_HEADER 一致，直接走 mapIntakeV2Row。
+export async function fetchIntakeProducts(remoteUrl, onError, fetchImpl = (typeof fetch !== 'undefined' ? fetch : null)) {
+  if (!remoteUrl || typeof fetchImpl !== 'function') return [];
+  try {
+    const res = await fetchImpl(remoteUrl, { headers: { 'cache-control': 'no-cache' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    const arr = Array.isArray(body && body.products) ? body.products : [];
+    return arr
+      .map(mapIntakeV2Row)
+      .filter((row) => row.product_url && (!row.status || row.status.toLowerCase() === 'active'));
+  } catch (e) {
+    if (typeof onError === 'function') onError(e);
+    return [];
+  }
+}
+
+// async 总入口：base + intake 文件(config/product-intake.csv) + intake 远程(/api/intake) 三方合并去重。
+// remoteUrl 来自 env HERMES_INTAKE_URL；不传则等价于 loadSweepProducts（纯文件版，行为不变）。
+// 任一来源失败只 warning，base 永远原样保留 → 缺文件/无网时现有 sweep 零影响。
+export async function loadSweepProductsAsync(baseProducts, { log = () => {}, csvPath, remoteUrl, fetchImpl } = {}) {
+  const base = Array.isArray(baseProducts) ? baseProducts : [];
+  let intake = [];
+  try {
+    intake = loadIntakeProducts(csvPath, (e) => log(`[products] WARN intake 文件读取/解析失败，已忽略: ${(e && e.message) || e}`));
+  } catch (e) {
+    log(`[products] WARN intake 文件读取/解析失败，已忽略: ${(e && e.message) || e}`);
+  }
+  let remote = [];
+  if (remoteUrl) {
+    remote = await fetchIntakeProducts(remoteUrl, (e) => log(`[products] WARN intake 远程拉取失败，已忽略: ${(e && e.message) || e}`), fetchImpl);
+  }
+  const merged = mergeProducts(mergeProducts(base, intake), remote);
+  const skipped = (base.length + intake.length + remote.length) - merged.length;
+  log(`[products] base=${base.length} intake_file=${intake.length} intake_remote=${remote.length} merged=${merged.length} skipped_duplicates=${skipped}`);
+  return merged;
+}
+
 // ── Phase 2 已接入（src/runOnce.mjs）──────────────────────────────
 // runOnce() 与 runSweep() 取商品处由：
 //   const products = loadProducts();

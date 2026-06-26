@@ -1562,7 +1562,15 @@ const metricShops = document.getElementById('metricShops');
 const metricLatest = document.getElementById('metricLatest');
 const metricDrops = document.getElementById('metricDrops');
 const metricMaxDrop = document.getElementById('metricMaxDrop');
-const DEFAULT_VOUCHER_DISCOUNT = 5;
+// dashboard 唯一价格 = buyer 在 Shopee 页面看到的价(display_price，后台抓取时按封顶券算好)。
+// 没有 display_price 的旧行/导入数据 → 回退到 currentPrice(挂牌价)。前端零计算、不显示 voucher。
+function priceOf(row) {
+  if (!row) return null;
+  const d = Number(row.displayPrice);
+  if (Number.isFinite(d) && d > 0) return d;
+  const p = Number(row.currentPrice);
+  return Number.isFinite(p) ? p : null;
+}
 const SHOP_ROLE_BY_SHOP = {
   '116917349': 'A',
   '77792787': 'B',
@@ -1578,12 +1586,6 @@ const ROLE_LABELS = {
 let pendingWatchlistCommands = '';
 bootstrap();
 
-function afterVoucher(value, discount = DEFAULT_VOUCHER_DISCOUNT) {
-  if (value == null) return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Number((n - discount).toFixed(2)));
-}
 
 function formatRmDisplay(value) {
   if (value == null) return '-';
@@ -1935,6 +1937,9 @@ function normalizeVariant(variant, context = {}) {
     inStock: Boolean(variant.inStock),
     // 是否可买/可选（页面没灰）。API 已返回；缺省（旧数据/本地导入）按可买，避免误判 Not Available。
     available: variant.available !== false,
+    // 逐款 voucher 实扣额(RM) + 来源：interface(接口真实) / estimated(兜底估算) / 空(无券)。
+    // buyer 可见价(后台按封顶券算好的 display_price)；缺省回退 currentPrice 由 priceOf 处理。
+    displayPrice: toNumberOrNull(variant.displayPrice),
   };
 }
 
@@ -2251,6 +2256,7 @@ function flattenRecords(records) {
       currentPrice: variant.currentPrice,
       originalPrice: variant.originalPrice,
       promoPrice: variant.promoPrice,
+      displayPrice: variant.displayPrice ?? null,
       inStock: variant.inStock,
       stock: variant.stock,
     }))
@@ -2488,7 +2494,8 @@ function render() {
         const label = typeof c === 'string' ? c : (c && c.label) || '';
         return label ? `<span style="display:inline-block;margin:3px 4px 0 0;padding:2px 7px;border-radius:6px;background:rgba(250,204,21,.22);color:#7a5c10;font-size:11px;font-weight:700">🎟 ${escapeHtml(label)}</span>` : '';
       }).join('');
-      const price = formatRmDisplay(afterVoucher(row.currentPrice));
+      // dashboard 唯一价格 = display_price(buyer 在 Shopee 看到的价)；前端零计算。
+      const price = formatRmDisplay(priceOf(row));
       const original = formatRmDisplay(row.originalPrice);
       const stockClass = row.inStock ? 'pill' : 'pill out';
       const stockLabel = row.inStock ? `In stock${row.stock != null ? ` (${row.stock})` : ''}` : 'Out of stock';
@@ -2526,7 +2533,7 @@ function renderDropList(drops) {
         <article class="report-card">
           <strong>${escapeHtml(drop.title)}</strong>
           <div class="report-meta">${escapeHtml(drop.variantName)} · ${escapeHtml(sellerLabel(drop))}</div>
-          <div class="report-meta">${escapeHtml(formatRmDisplay(afterVoucher(drop.previousPrice)))} → ${escapeHtml(formatRmDisplay(afterVoucher(drop.currentPrice)))} (down ${escapeHtml(formatRmDisplay(drop.dropAmount))})</div>
+          <div class="report-meta">${escapeHtml(formatRmDisplay(drop.previousPrice))} → ${escapeHtml(formatRmDisplay(drop.currentPrice))} (down ${escapeHtml(formatRmDisplay(drop.dropAmount))})</div>
           <div class="report-meta">Last ${escapeHtml(drop.previousGrabbedAt)} | Current ${escapeHtml(drop.grabbedAt)}</div>
         </article>
       `;
@@ -2551,7 +2558,6 @@ function escapeAttribute(value) {
 (function () {
   const OUR_KEY = 'd3-boss-our-price-v1';
   const CSP_KEY = 'd3-boss-csp-price-v1'; // 成本价 cspPrice。预留利润: profit = ourPrice - cspPrice; profitMargin = profit / ourPrice（暂不显示利润栏）
-  const DEFAULT_VOUCHER_DISCOUNT = 5;
 
   const css = document.createElement('style');
   css.textContent = `
@@ -2596,6 +2602,13 @@ function escapeAttribute(value) {
   .boss-table td.empty-cell{text-align:center;color:#c4b8a6}
   .na-cell{color:#b23a2b;font-style:italic;font-weight:600;font-size:12px}
   .not-selling{color:#9c8f80;font-style:italic;font-size:13px} /* 该档位/商家没在卖(no price)。仅显示,不参与计算。 */
+  .boss-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .boss-table{min-width:1000px} /* 窄屏时横向滚动,保留列宽可读 */
+  .scroll-hint{font-size:12px;color:#9c8f80;font-style:italic;text-align:center;margin:6px 0}
+  @media (min-width:1280px){.scroll-hint{display:none}} /* 宽屏放得下就不显示提示 */
+  .boss-details{margin-top:4px}
+  .boss-details>summary.boss-summary{cursor:pointer;font-size:1.05em;font-weight:600;color:#3a2f1c;padding:8px 0;list-style:revert}
+  .boss-summary-hint{font-size:12px;color:#9c8f80;font-weight:400;font-style:italic}
   .boss-table td.na-cell{text-align:center}
   .takeback-pos{color:#27401f;font-weight:700}
   .takeback-neg{color:#b23a2b;font-weight:700}
@@ -2637,12 +2650,8 @@ function escapeAttribute(value) {
     return Number.isFinite(n) ? n.toFixed(2).replace(/\.00$/, '') : String(v);
   };
   const fmt = (v) => (v == null ? '—' : 'RM' + fmtMoney(v));
-  const afterVoucher = (v, discount = DEFAULT_VOUCHER_DISCOUNT) => {
-    if (v == null) return null;
-    const n = Number(v);
-    if (!Number.isFinite(n)) return null;
-    return Math.max(0, Number((n - discount).toFixed(2)));
-  };
+  // 竞品对比口径 = buyer 可见价(display_price，回退 listing)。point 8：boss/最低价全用这个。
+  const effectivePriceOf = (variant) => priceOf(variant);
   const phoneModel = (t) => {
     let s = String(t).split('(')[0];
     s = s.replace(/samsung|galaxy/ig, '').replace(/\s+/g, ' ').trim();
@@ -2884,7 +2893,7 @@ function escapeAttribute(value) {
         // self(我们公司)是「我们的价」基准列，切到任何对手 tab 都要保留 → 豁免 bossRole 过滤；仍受搜索/系列/型号筛选
         if (typeof matchesCurrentFilters === 'function' && !matchesCurrentFilters(rowForFilters, role === 'self' ? { includeBossRole: false } : {})) continue;
         if (v.currentPrice == null) continue;
-        const effectivePrice = afterVoucher(v.currentPrice);
+        const effectivePrice = effectivePriceOf(v);
         if (effectivePrice == null) continue;
         const ct = canonTier(v);
         if (!ct) continue; // 只统计 Promo / Basic
@@ -3083,14 +3092,20 @@ function escapeAttribute(value) {
     const _mins = _latestGrabbed ? Math.round((Date.now() - _latestGrabbed) / 60000) : -1;
     const _rel = _mins < 0 ? '' : _mins < 1 ? '刚刚' : _mins < 60 ? `${_mins} 分钟前` : `${Math.floor(_mins / 60)} 小时前`;
     const _lastUpdateText = _latestGrabbed ? `🕒 最新更新 ${new Date(_latestGrabbed).toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', hour12: false })}（${_rel}）` : '';
+    const bossTableOpen = (function () { try { return localStorage.getItem('d3_boss_table_open') === '1'; } catch (e) { return false; } })();
     sec.innerHTML =
       '<h2>Boss comparison view</h2>' +
       '<p class="muted" style="margin-top:6px">Shows our price beside Deal Direct, Spray Gadget, and TAC Mobiles. <strong style="color:#9e3d2c">Red = competitor is cheaper than us</strong>, green background = the lowest market price for that model.</p>' +
       `<div style="margin-top:10px"><button id="bossRefreshNow" class="refresh-now-btn">🔄 Refresh now</button> <span id="bossLastUpdate" class="muted" style="font-size:12px;margin-left:8px">${_lastUpdateText}</span> <span id="bossRefreshMsg" class="muted" style="font-size:12px"></span></div>` +
       `<div class="boss-legend">${legend}</div>` +
       filterHtml +
-      `<h3>${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'}</h3>` +
-      `<div style="overflow-x:auto"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+      `<details class="boss-details"${(bossTableOpen || selectedRole) ? ' open' : ''}>` +
+        `<summary class="boss-summary">${selectedRole ? `${esc(roleName(selectedRole))} comparison table` : 'Full comparison table'} <span class="boss-summary-hint">（点击展开/收起）</span></summary>` +
+        `<div class="scroll-hint">← 左右滑动查看更多 →</div>` +
+        `<div class="boss-scroll"><table class="boss-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
+      `</details>`;
+    const _bossDetails = sec.querySelector('.boss-details');
+    if (_bossDetails) _bossDetails.addEventListener('toggle', () => { try { localStorage.setItem('d3_boss_table_open', _bossDetails.open ? '1' : '0'); } catch (e) {} });
     sec.querySelectorAll('input[data-model]').forEach((el) => { el.onchange = () => {
       const mk = el.dataset.model;
       const v = Number(el.value);
@@ -3208,7 +3223,7 @@ function escapeAttribute(value) {
     })();
     </script>
     <!-- ===================== Product Intake (内部用 · Phase 1 · localStorage) ===================== -->
-    <button id="pi-launch" type="button" title="内部：手动新增要监控的商品">🛠 Product Intake</button>
+    <button id="pi-launch" type="button" aria-label="Product Intake" title="Product Intake（内部：手动新增监控商品）">🛠<span class="pi-sr">Product Intake</span></button>
     <div id="pi-overlay" hidden>
       <div class="pi-modal">
         <div class="pi-head">
@@ -3261,8 +3276,10 @@ function escapeAttribute(value) {
       </div>
     </div>
     <style>
-      /* 右上角内部入口;ID 选择器盖过全局 button{color:white;background:var(--accent)}。显式声明保证文字可见、宽度自适应、不被裁切。 */
-      #pi-launch{position:fixed;top:16px;right:16px;bottom:auto;left:auto;z-index:99990;display:inline-flex;align-items:center;justify-content:center;gap:6px;width:auto;min-width:0;max-width:none;height:auto;background:#3b2a1a;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;line-height:1.2;text-indent:0;letter-spacing:normal;white-space:nowrap;overflow:visible;text-overflow:clip;box-shadow:0 4px 12px rgba(0,0,0,.18);cursor:pointer}
+      /* 右上角圆形 FAB;ID 选择器盖过全局 button{...}。icon-only,文字给屏幕阅读器/title。 */
+      #pi-launch{position:fixed;top:16px;right:16px;bottom:auto;left:auto;z-index:99990;display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;min-width:0;max-width:none;padding:0;background:#3b2a1a;color:#fff;border:0;border-radius:50%;font-size:22px;line-height:1;text-indent:0;box-shadow:0 4px 12px rgba(0,0,0,.22);cursor:pointer}
+      #pi-launch:hover{background:#4a3522}
+      .pi-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
       #pi-overlay{position:fixed;inset:0;z-index:100002;background:rgba(40,30,15,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px}
       #pi-overlay[hidden]{display:none} /* 关键:id 选择器的 display:flex 会盖过 [hidden],必须显式让 hidden 生效,否则 close() 无效 */
       .pi-modal{background:#fbf6ec;width:min(1100px,96vw);border-radius:14px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',sans-serif;color:#3a2f1c}
@@ -3308,6 +3325,22 @@ function escapeAttribute(value) {
     <script>
     (function(){
       var PI_PRODUCTS='d3_product_intake', PI_MERCHANTS='d3_merchant_registry';
+      var PI_WORKER='https://d3-price-worker.dthree.workers.dev';
+      // 把当前 Active 商品全集推到云端(Worker /api/intake),Hermes 下一轮 sweep 自动拉取合并抓取。
+      // mirror 语义:整表替换,所以增/删/改/导入后都调一次。fire-and-forget,失败不打断本地操作。
+      function pushIntakeCloud(silent){
+        try{
+          var active=products().filter(function(p){return (p.status||'').toLowerCase()==='active';})
+            .map(function(p){return {merchant:p.merchant_name,item_id:p.item_id||'',shop_id:p.shop_id||'',
+              model_name:p.model_name,ram:p.ram||'',storage:p.storage||'',category:p.category||'',
+              shopee_url:p.shopee_url,status:'Active'};});
+          fetch(PI_WORKER+'/api/intake',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({products:active})})
+            .then(function(r){return r.json();})
+            .then(function(j){if(!silent&&j&&j.ok)setMsg('已同步 '+j.stored+' 个 Active 商品到云端,下一轮 Hermes 自动抓。',true);})
+            .catch(function(){if(!silent)setMsg('云端同步失败(本地已保存)。可稍后用 Export 兜底。',false);});
+        }catch(e){}
+      }
       var DEFAULT_MERCHANTS=[['D3','our_store'],['Deal Direct','competitor'],['TAC','competitor'],['Spray','competitor']];
       var DEFAULT_NAMES={};DEFAULT_MERCHANTS.forEach(function(x){DEFAULT_NAMES[x[0].toLowerCase()]=true;});
       function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch(e){return d;}}
@@ -3414,11 +3447,11 @@ function escapeAttribute(value) {
       function toggleIgnore(id){
         var list=products();var p=list.find(function(x){return x.id===id;});if(!p)return;
         p.status=(p.status||'').toLowerCase()==='ignore'?'Active':'Ignore';p.updated_at=nowISO();
-        save(PI_PRODUCTS,list);renderList();
+        save(PI_PRODUCTS,list);renderList();pushIntakeCloud();
       }
       function del(id){
         if(!confirm('删除这个商品?(只删本机记录,不影响 D1/现有抓取)'))return;
-        save(PI_PRODUCTS,products().filter(function(x){return x.id!==id;}));renderList();
+        save(PI_PRODUCTS,products().filter(function(x){return x.id!==id;}));renderList();pushIntakeCloud();
       }
 
       function submit(e){
@@ -3445,7 +3478,7 @@ function escapeAttribute(value) {
         }
         save(PI_PRODUCTS,list);
         setMsg((editId?'已更新':'已新增')+(itemId?'':' (解析不到 itemId → 标记 Review Needed)'),true);
-        clearForm();renderList();
+        clearForm();renderList();pushIntakeCloud();
       }
 
       function addMerchant(){
@@ -3495,7 +3528,7 @@ function escapeAttribute(value) {
         var ps=products();var changed=false;
         ps.forEach(function(p){if(p.merchant_name===old){p.merchant_name=name;p.updated_at=nowISO();changed=true;}});
         save(PI_MERCHANTS,list);if(changed)save(PI_PRODUCTS,ps);
-        fillMerchantSelect($('pi-merchant'));renderMerchantList();renderList();
+        fillMerchantSelect($('pi-merchant'));renderMerchantList();renderList();if(changed)pushIntakeCloud(true);
       }
 
       // 导出/导入的自描述列,Hermes 侧 src/intake-products.mjs 直接读取(见该文件 product-intake 表头分支)。
@@ -3560,9 +3593,10 @@ function escapeAttribute(value) {
         fillMerchantSelect($('pi-merchant'));renderList();
         var box=$('pi-merchant-manage');if(box&&!box.hidden)renderMerchantList();
         setMsg('导入完成:新增 '+added+' 个,跳过 '+skipped+' 个(重复或缺字段)。',true);
+        pushIntakeCloud(true);
       }
 
-      function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;}
+      function open(){seedMerchants();fillMerchantSelect($('pi-merchant'));renderList();$('pi-overlay').hidden=false;pushIntakeCloud(true);}
       // 关闭:隐藏浮层 + 清理 editing 状态(只清表单,不动 localStorage 已保存商品)。
       function close(){clearForm();$('pi-overlay').hidden=true;}
 

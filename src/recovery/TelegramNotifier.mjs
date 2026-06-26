@@ -17,7 +17,9 @@ export class TelegramNotifier {
   constructor({ token = process.env.TELEGRAM_BOT_TOKEN, chatId = process.env.TELEGRAM_CHAT_ID } = {}) {
     this.token = token;
     this.chatId = chatId;
-    this.enabled = Boolean(token && chatId);
+    // 总静音开关：HERMES_NOTIFY=0 时，所有主动推送(验证提醒 + sweep 报告)都不发。
+    // 不影响 telegram-bot.mjs(另一个进程)对 /status 等命令的回复。
+    this.enabled = Boolean(token && chatId) && process.env.HERMES_NOTIFY !== '0';
   }
 
   async sendMessage(text) {

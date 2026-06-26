@@ -29,10 +29,12 @@ function rowsToRecords(rows) {
       capacity: r.capacity,
       tier: r.tier,
       currentPrice: r.price,
+      displayPrice: r.display_price ?? null,
       name: r.sku,
       color: r.color || '',
       variantName: r.variant_name || '',
       voucherAmount: r.voucher_amount ?? 0,
+      voucherSource: r.voucher_source || '',
       soldOut,
       inStock: !soldOut,
       // 是否可买/可选(页面没灰)；缺省(旧行/未迁移)按可买。前端 Phase 3 据此显示 Not Available。
@@ -204,7 +206,7 @@ export default {
     // Returns {records:[...]} compatible with existing frontend
     if (pathname === '/api/records' && request.method === 'GET') {
       const { results } = await env.DB.prepare(`
-        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, available, color, variant_name, grabbed_at
+        SELECT shop_id, item_id, title, sku, model, capacity, tier, price, display_price, voucher_amount, voucher_source, sold_out, available, color, variant_name, grabbed_at
         FROM variant_prices
         ORDER BY shop_id, item_id, model, tier, capacity
       `).all();
@@ -282,12 +284,14 @@ export default {
           itemRows.push(
             env.DB.prepare(`
               INSERT INTO variant_prices
-                (shop_id, item_id, title, sku, model, capacity, tier, price, voucher_amount, sold_out, available, color, variant_name, grabbed_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                (shop_id, item_id, title, sku, model, capacity, tier, price, display_price, voucher_amount, voucher_source, sold_out, available, color, variant_name, grabbed_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
               ON CONFLICT(shop_id, item_id, model, tier, capacity, color) DO UPDATE SET
                 title=excluded.title, sku=excluded.sku,
                 price=excluded.price,
+                display_price=excluded.display_price,
                 voucher_amount=excluded.voucher_amount,
+                voucher_source=excluded.voucher_source,
                 sold_out=excluded.sold_out,
                 available=excluded.available,
                 color=excluded.color, variant_name=excluded.variant_name,
@@ -295,7 +299,9 @@ export default {
             `).bind(
               rec.shopId, rec.itemId, rec.title || '', sku,
               v.model, v.capacity || '', v.tier || '', v.currentPrice ?? null,
+              v.displayPrice ?? v.currentPrice ?? null,
               v.voucherAmount ?? rec.voucherAmount ?? 0,
+              v.voucherSource ?? rec.voucherSource ?? '',
               (v.inStock === false || rec.soldOut) ? 1 : 0,
               v.available === false ? 0 : 1,
               v.color || '', v.variantName || v.name || '',
@@ -355,6 +361,40 @@ export default {
         LIMIT 500
       `).bind(model).all();
       return json({ history: results });
+    }
+
+    // ── Product Intake：网页 ⇄ Hermes 的云端中转 ───────────────────────────────
+    // 页面 Add/Edit/Delete 后 POST 当前 Active 商品全集（mirror，先清后插整表替换）；
+    // Hermes 每轮 sweep 开始 GET 拉取合并进抓取列表。与 /api/trigger 一样不带鉴权
+    // （内部工具）；写入仅影响“新商品”sweep，绝不触碰 variant_prices / price_history。
+    if (pathname === '/api/intake') {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS intake_products (
+        merchant TEXT, item_id TEXT, shop_id TEXT, model_name TEXT, ram TEXT,
+        storage TEXT, category TEXT, shopee_url TEXT, status TEXT, updated_at TEXT
+      )`).run();
+
+      if (request.method === 'POST') {
+        const body = await request.json().catch(() => null);
+        const products = Array.isArray(body?.products) ? body.products : [];
+        const rows = products
+          .filter((p) => p && p.shopee_url && String(p.status || '').toLowerCase() === 'active')
+          .map((p) => env.DB.prepare(`INSERT INTO intake_products
+            (merchant, item_id, shop_id, model_name, ram, storage, category, shopee_url, status, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))`).bind(
+            String(p.merchant || ''), String(p.item_id || ''), String(p.shop_id || ''),
+            String(p.model_name || ''), String(p.ram || ''), String(p.storage || ''),
+            String(p.category || ''), String(p.shopee_url || ''), 'Active'));
+        // 整表替换：先清空，再分批插入（D1 batch 上限 100 条/批）。
+        await env.DB.prepare(`DELETE FROM intake_products`).run();
+        for (let i = 0; i < rows.length; i += 100) await env.DB.batch(rows.slice(i, i + 100));
+        return json({ ok: true, stored: rows.length });
+      }
+
+      if (request.method === 'GET') {
+        const { results } = await env.DB.prepare(`SELECT merchant, item_id, shop_id, model_name,
+          ram, storage, category, shopee_url, status FROM intake_products`).all();
+        return json({ ok: true, count: (results || []).length, products: results || [] });
+      }
     }
 
     return json({ error: 'not found' }, 404);

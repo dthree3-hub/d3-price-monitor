@@ -3,10 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSnapshot } from './build-snapshot.mjs';
 import { scrapeViaCrawl4AI } from './crawl4ai-shopee.mjs';
-import { scrapeProduct, scrapeProductViaCDP } from './scraper.mjs';
+import { scrapeProduct, scrapeProductViaCDP, voucherDeductionDetail } from './scraper.mjs';
 import { scrapeViaSA } from './scraperapi.mjs';
 import { parseVariantDescriptor } from './variant-parser.mjs';
 import { buildListingTrace, dumpListingTrace } from './trace.mjs';
+import { sendSweepReport } from './notify-sweep.mjs';
 import {
   attachCompetitorMeta,
   buildHermesMarkdown,
@@ -24,7 +25,7 @@ import {
   writeHermesStatus,
 } from './lib-hermes.mjs';
 import { projectRoot } from './lib-records.mjs';
-import { loadSweepProducts } from './intake-products.mjs'; // Phase 2: 合并 config/product-intake.csv
+import { loadSweepProducts, loadSweepProductsAsync } from './intake-products.mjs'; // Phase 2: 合并 config/product-intake.csv + 远程 /api/intake
 
 const reportPath = path.join(projectRoot, 'out', 'hermes-latest.md');
 const DEFAULT_CLOUD_RECORDS_URL = 'https://getpantry.cloud/apiv1/pantry/27e8f225-4039-4ec9-b2a7-cb9e324738e5/basket/d3';
@@ -62,53 +63,120 @@ function isHardBlockError(error) {
   );
 }
 
+// 反爬类错误(可两阶段重试)：90309999 / anti-bot / captcha / verification / blocked。
+function isAntiBotError(error) {
+  const text = String(error?.message || error || '').toLowerCase();
+  return /90309999|anti-?bot|captcha|verification|blocked/.test(text);
+}
+
+// 从商品链接解析 shopId/itemId（结构化失败项用）。
+function parseShopItem(url) {
+  const m = String(url || '').match(/i\.(\d+)\.(\d+)/);
+  return { shopId: m ? m[1] : '', itemId: m ? m[2] : '' };
+}
+
 function isRetriableCdpFetchError(error) {
   const text = String(error?.message || error || '').toLowerCase();
   return text.includes('[cdp_fetch]') || text.includes('页面内 fetch 失败');
 }
 
-// 按款式价格算「该款最优 voucher 折扣(RM)」：在所有券里挑——
-//  · 满减门槛 minSpend：只有该款价格 ≥ 门槛才算这张券（价格未知时只算无门槛券）；
-//  · 折扣额：固定额取 fixed，百分比取 percent×该款价格（5%×527 ≠ 5%×999，必须逐款算）；
-//  · 多张券取折扣最大的那张。
-function variantVoucherAmount(price, vouchers) {
-  const list = Array.isArray(vouchers) ? vouchers : [];
-  const p = Number(price);
-  const priceKnown = Number.isFinite(p) && p > 0;
-  let best = 0;
-  for (const v of list) {
-    const minSpend = Number(v?.minSpend) || 0;
-    if (minSpend > 0) {
-      if (!priceKnown || p < minSpend) continue; // 不满足满减门槛
-    }
-    const fixed = Number(v?.fixed) || 0;
-    const percent = Number(v?.percent) || 0;
-    const pct = percent > 0 && priceKnown ? Math.round(p * (percent / 100) * 100) / 100 : 0;
-    const discount = Math.max(fixed, pct);
-    if (discount > best) best = discount;
+// 兜底 voucher 配置（仅接口完全无券时启用，命中标 estimated）。读一次缓存。
+let _voucherFallback = null;
+function loadVoucherFallback() {
+  if (_voucherFallback) return _voucherFallback;
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const p = path.join(here, '..', 'config', 'voucher-fallback.json');
+    _voucherFallback = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    _voucherFallback = { assumed_platform_voucher: 0, min_price: 50, by_shop: {} };
   }
-  return best;
+  return _voucherFallback;
+}
+
+// 接口完全无券时的兜底额（RM）：按 shopId 覆盖 > 全局；价格须 ≥ min_price；0 = 关闭。
+function fallbackVoucherAmount(price, shopId) {
+  const cfg = loadVoucherFallback();
+  const byShop = cfg.by_shop && typeof cfg.by_shop === 'object' ? cfg.by_shop : {};
+  const shopVal = Number(byShop[String(shopId)]);
+  const assumed = Number.isFinite(shopVal) && shopVal > 0 ? shopVal : (Number(cfg.assumed_platform_voucher) || 0);
+  if (!(assumed > 0)) return 0;
+  const minPrice = Number(cfg.min_price) || 0;
+  const p = Number(price);
+  if (Number.isFinite(p) && p > 0 && p >= minPrice) return Math.round(assumed * 100) / 100;
+  return 0;
+}
+
+// 接口槽位 → voucher_source 标签。
+const SLOT_SOURCE = { shop: 'shop_api', platform: 'platform_api', ads: 'ads_api' };
+
+// 逐款算 voucher：优先接口已套用券(含封顶)；接口整条 listing 都没券时才退到兜底 config(source='estimated')。
+//   { amount, source }：source = 实际有扣额的槽位标签(如 'shop_api'，多槽位用 '+' 连)；估算='estimated'；无券=''。
+function variantVoucher(price, vouchers, shopId) {
+  const list = Array.isArray(vouchers) ? vouchers : [];
+  if (list.length > 0) {
+    const { amount, slots } = voucherDeductionDetail(price, list);
+    if (amount > 0) {
+      const labels = [...new Set(slots.map((s) => SLOT_SOURCE[s] || `${s}_api`))];
+      return { amount, source: labels.join('+') };
+    }
+    // 接口有券但该款不满门槛/无扣额 → 真实地标 0，不退兜底(接口已知不适用)。
+    return { amount: 0, source: '' };
+  }
+  const fb = fallbackVoucherAmount(price, shopId);
+  return fb > 0 ? { amount: fb, source: 'estimated' } : { amount: 0, source: '' };
 }
 
 function normalizeScrapedProduct(product, scraped) {
   const voucherFixed = toNonNegativeNumberOrZero(scraped.voucherAmount);
   const vouchers = Array.isArray(scraped.vouchers) ? scraped.vouchers : [];
-  const parsedVariants = scraped.variants.map((variant) => ({
-    name: variant.variant,
-    ...parseVariantDescriptor(variant.variant, {
+  // 记录级 source：listing 上有哪些接口槽位券(仅作 variant 缺省时兜底，逐款 source 才是权威)。
+  const recordSource = vouchers.length > 0
+    ? [...new Set(vouchers.map((v) => SLOT_SOURCE[v.slot] || `${v.slot}_api`))].join('+')
+    : '';
+  // 价格全部由 scraper extractFromPdp 用 Shopee 自己的 product_price/final_price_info 算好(见该文件)：
+  //   currentPrice = raw SKU 现价；displayPrice = 页面 After Voucher 红价(显示模型精确 / 其余套实际券)；voucherAmount = 实扣券额。
+  //   不再用 variantVoucher 自算接口券：显示模型直接取 Shopee 已算好的红价更准(封顶/门槛/平台·商家承担都靠红价)。
+  const priceDebug = process.env.HERMES_PRICE_DEBUG === '1';
+  const seller = scraped.sellerName || product.competitor || '';
+  const ts = scraped.scrapedAt || new Date().toISOString();
+  const parsedVariants = scraped.variants.map((variant) => {
+    const parsed = parseVariantDescriptor(variant.variant, {
       title: scraped.title,
       itemModel: product.our_product,
       ourProduct: product.our_product,
-    }),
-    currentPrice: variant.current,
-    originalPrice: variant.price,
-    promoPrice: variant.promo_price,
-    stock: variant.stock,
-    inStock: !variant.sold_out,
-    // 是否可买/可选(页面没灰)；scraper 未给(旧数据)时默认可买。下游写 D1 available 列。
-    available: variant.available !== false,
-    voucherAmount: variantVoucherAmount(variant.current, vouchers),
-  }));
+    });
+    const rawSku = variant.rawSkuPrice ?? variant.current;
+    const displayPrice = variant.displayPrice ?? rawSku;       // buyer 可见价：dashboard 唯一显示 + 对比口径
+    const voucherAmount = toNonNegativeNumberOrZero(variant.voucherAmount); // = rawSku − displayPrice
+    if (priceDebug) {
+      logHermes(`[price] ${JSON.stringify({
+        seller, url: product.product_url,
+        package: parsed.tier || '', model: parsed.model || variant.variant,
+        raw_sku_price: rawSku,
+        visible_dom_price: null, // 走 API(red price 由 final_price_info 渲染)，未单独读 DOM
+        visible_after_voucher_price: variant.displayedExact ? displayPrice : null, // 仅显示模型=页面精确红价
+        final_display_price: displayPrice,
+        voucher_amount: voucherAmount,
+        voucher_source: variant.voucherSource || 'raw_sku',
+        ts,
+      })}`);
+    }
+    return {
+      name: variant.variant,
+      ...parsed,
+      currentPrice: rawSku,            // 挂牌价(raw)：保留作后台 debug，不影响 dashboard 对比
+      displayPrice,                    // buyer 可见价：dashboard 唯一显示 + 对比口径
+      originalPrice: variant.price,
+      promoPrice: variant.promo_price,
+      stock: variant.stock,
+      inStock: !variant.sold_out,
+      // 是否可买/可选(页面没灰)；scraper 未给(旧数据)时默认可买。下游写 D1 available 列。
+      available: variant.available !== false,
+      voucherAmount,                   // 后台 debug：实扣额(= rawSku − displayPrice)
+      voucherSource: variant.voucherSource || '', // final_price_info(exact)/applied_voucher(fixed|percent)/raw_sku
+    };
+  });
   const record = attachCompetitorMeta({
     schemaVersion: 1,
     grabbedAt: scraped.scrapedAt || new Date().toISOString(),
@@ -118,8 +186,9 @@ function normalizeScrapedProduct(product, scraped) {
     sellerName: scraped.sellerName || product.competitor || '',
     title: scraped.title,
     currency: 'MYR',
-    // 记录级仅保留无门槛固定额(单一数字无法表达百分比/满减)；逐款折扣放在 variant.voucherAmount。
+    // 记录级 = 接口默认 model 的实扣额(已封顶)；逐款实扣放在 variant.voucherAmount。
     voucherAmount: voucherFixed,
+    voucherSource: recordSource,
     soldOut: Array.isArray(scraped.variants) && scraped.variants.length > 0 && scraped.variants.every((v) => v.sold_out),
     variants: parsedVariants,
   }, product);
@@ -268,7 +337,7 @@ export async function runOnce() {
   const mode = process.env.HERMES_SCRAPE_MODE || 'scraperapi';
   const itemDelayMs = Number(process.env.HERMES_ITEM_DELAY_MS || 2500);
   const abortSoftBlocks = Number(process.env.HERMES_ABORT_AFTER_SOFTBLOCKS || 2);
-  const allProducts = loadSweepProducts(loadProducts(), { log: logHermes }); // base + product-intake.csv
+  const allProducts = await loadSweepProductsAsync(loadProducts(), { log: logHermes, remoteUrl: process.env.HERMES_INTAKE_URL }); // base + product-intake.csv + /api/intake
   if (!allProducts.length) {
     usage();
     throw new Error(`没有可抓取的商品。先编辑 ${productsFile}`);
@@ -327,19 +396,30 @@ export async function runOnce() {
     fs.appendFileSync(reportPath, `\n${body}`);
   }
 
-  const notify = process.env.HERMES_NOTIFY !== '0';
-  if (notify) {
-    const message = buildTelegramMessage(changes);
-    await sendTelegramMessage(message);
-  }
-
+  let cloudSync = { ok: false, info: '' };
   try {
     const cloud = await syncCloudRecords(merged);
     if (cloud.synced) {
+      cloudSync = { ok: true, info: `${cloud.records} 条` };
       logHermes(`云端数据已同步: ${cloud.url}（${cloud.records} 条最新记录）`);
+    } else {
+      cloudSync = { ok: false, info: cloud.reason || '未同步' };
     }
   } catch (error) {
+    cloudSync = { ok: false, info: error.message || String(error) };
     logHermes(`云端同步失败: ${error.message || String(error)}`);
+  }
+
+  // 统一通知(弃用旧 buildTelegramMessage)。legacy 单批路径无两阶段 retry。
+  try {
+    await sendSweepReport({
+      records: merged, changes, failures,
+      retry: { antiBotFailures: 0, retried: 0, retrySuccess: 0, retryFailed: 0, skipped: 0 },
+      scraped: incoming.length, total: products.length, failuresCount: failures.length,
+      cloudSync, completedAt: new Date(),
+    }, { log: logHermes });
+  } catch (error) {
+    logHermes(`[notify] 报告异常(忽略): ${error.message || String(error)}`);
   }
 
   if (shouldAdvanceBatchCursor) {
@@ -434,7 +514,7 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
   const abortSoftBlocks = Number(process.env.HERMES_ABORT_AFTER_SOFTBLOCKS || 2);
   const selfShop = String(process.env.HERMES_SELF_SHOP_ID || '54618012');
 
-  const all = loadSweepProducts(loadProducts(), { log: logHermes }); // base + product-intake.csv
+  const all = await loadSweepProductsAsync(loadProducts(), { log: logHermes, remoteUrl: process.env.HERMES_INTAKE_URL }); // base + product-intake.csv + /api/intake
   if (!all.length) {
     usage();
     throw new Error(`没有可抓取的商品。先编辑 ${productsFile}`);
@@ -458,9 +538,10 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
       incoming.push(record);
       consecutiveSoftBlocks = 0;
     } catch (error) {
-      const message = `${product.competitor || '-'} | ${product.product_url} | ${error.message || String(error)}`;
-      failures.push(message);
-      logHermes(`抓取失败: ${message}`);
+      const { shopId, itemId } = parseShopItem(product.product_url);
+      const reason = error.message || String(error);
+      failures.push({ product, competitor: product.competitor || '-', shopId, itemId, reason, antiBot: isAntiBotError(error) });
+      logHermes(`抓取失败: ${product.competitor || '-'} | ${product.product_url} | ${reason}`);
       // 碰到验证、你在限定时间内没解（或主动中止）→ 立即停整轮，不继续抓（你要的）。
       if (error?.name === 'VerificationTimeoutError' || error?.name === 'VerificationAbortedError') {
         aborted = true;
@@ -484,6 +565,37 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
     if (delay > 0) await sleep(delay);
   }
 
+  // ── 反爬两阶段重试：主循环跑完后，把「反爬类失败」的 listing 各重跑一次 ──
+  // aborted(验证超时/连续硬封锁)时不 retry(session/IP 已异常)；上限 HERMES_RETRY_MAX(默认 10)。
+  const antiBotQueue = failures.filter((f) => f.antiBot);
+  const finalFailures = failures.filter((f) => !f.antiBot);
+  const retry = { antiBotFailures: antiBotQueue.length, retried: 0, retrySuccess: 0, retryFailed: 0, skipped: 0 };
+  if (aborted) {
+    finalFailures.push(...antiBotQueue); // 整轮已 abort → 反爬失败不重试，全列最终失败
+  } else if (antiBotQueue.length) {
+    const cap = Number(process.env.HERMES_RETRY_MAX || 10);
+    const toRetry = antiBotQueue.slice(0, cap);
+    const overCap = antiBotQueue.slice(cap);
+    retry.skipped = overCap.length;
+    finalFailures.push(...overCap); // 超上限的直接列最终失败
+    logHermes(`[retry] 反爬失败 ${antiBotQueue.length} 条，重试 ${toRetry.length}（上限 ${cap}），跳过 ${overCap.length}`);
+    for (const f of toRetry) {
+      retry.retried += 1;
+      try {
+        const record = await scrapeOneWithRetry(f.product, mode);
+        incoming.push(record);
+        retry.retrySuccess += 1;
+        logHermes(`[retry] 成功: ${f.competitor} item ${f.itemId}`);
+      } catch (error) {
+        retry.retryFailed += 1;
+        finalFailures.push({ ...f, reason: error.message || String(error) });
+        logHermes(`[retry] 仍失败: ${f.competitor} item ${f.itemId} | ${error.message || error}`);
+      }
+      const delay = minMs + Math.floor(Math.random() * Math.max(0, maxMs - minMs));
+      if (delay > 0) await sleep(delay);
+    }
+  }
+
   const latestTimestamp = incoming[0]?.grabbedAt || null;
   const { before, merged } = mergeNewRecords(incoming, all);
   const changes = latestTimestamp ? computeBatchChanges(before, merged, latestTimestamp) : [];
@@ -492,13 +604,9 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
 
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.writeFileSync(reportPath, markdown);
-  if (failures.length) {
-    const body = ['# 抓取失败', '', ...failures.map((line) => `- ${line}`), ''].join('\n');
+  if (finalFailures.length) {
+    const body = ['# 抓取失败（重试后仍失败）', '', ...finalFailures.map((f) => `- ${f.competitor || '-'} | item ${f.itemId || '-'} | ${f.reason || ''}`), ''].join('\n');
     fs.appendFileSync(reportPath, `\n${body}`);
-  }
-
-  if (process.env.HERMES_NOTIFY !== '0') {
-    await sendTelegramMessage(buildTelegramMessage(changes));
   }
 
   let cloudSync = { ok: false, info: '' };
@@ -515,6 +623,23 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
     logHermes(`云端同步失败: ${error.message || String(error)}`);
   }
 
+  // Telegram 报告：抓取→retry→merge→sync 全部完成后才发(开关 HERMES_NOTIFY_SWEEP=1)。失败不影响 Hermes。
+  try {
+    await sendSweepReport({
+      records: merged,
+      changes,
+      failures: finalFailures,
+      retry,
+      scraped: incoming.length,
+      total: selected.length,
+      failuresCount: finalFailures.length,
+      cloudSync,
+      completedAt: new Date(),
+    }, { log: logHermes });
+  } catch (error) {
+    logHermes(`[notify] sweep 报告异常(忽略): ${error.message || String(error)}`);
+  }
+
   writeHermesStatus({
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -525,15 +650,16 @@ export async function runSweep({ group = 'competitor', reason = '' } = {}) {
     scraped: incoming.length,
     latestTimestamp,
     changed: changes.filter((c) => c.status !== 'same').length,
-    failuresCount: failures.length,
-    failures,
+    failuresCount: finalFailures.length,
+    failures: finalFailures,
+    retry,
     aborted,
     reportPath,
     dashboardPath,
   });
 
-  logHermes(`[sweep] 完成 组=${group}，抓 ${incoming.length}/${selected.length} 条，失败 ${failures.length}${aborted ? '（因风控提前停止）' : ''}`);
-  return { group, products: selected.length, scraped: incoming.length, failures, changes, aborted, latestTimestamp, cloudSync };
+  logHermes(`[sweep] 完成 组=${group}，抓 ${incoming.length}/${selected.length} 条，最终失败 ${finalFailures.length}，重试成功 ${retry.retrySuccess}${aborted ? '（因风控提前停止）' : ''}`);
+  return { group, products: selected.length, scraped: incoming.length, failures: finalFailures, retry, changes, aborted, latestTimestamp, cloudSync };
 }
 
 function canonicalizeEntryPath(filePath) {

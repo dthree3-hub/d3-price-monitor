@@ -68,6 +68,24 @@ export function extractFromPdp(json) {
   const disabledCount = models.filter(isDisabledModel).length;
   if (disabledCount) console.error(`[scraper] 保留 ${disabledCount} 个灰掉/不可选 variant 并标记 available=false(${title})`);
 
+  // ── 页面真实显示价（After Voucher）：优先用 Shopee 自己算好的 product_price，不再自算「10% OFF」──
+  // product_price.price.single_value = 当前「显示模型」的红色 After Voucher 价（has_final_price=true）。
+  // 显示模型由 URL 的 display_model_id 决定（products.csv 已带），就是我们要对比的那个变体 → 精确命中。
+  // 其余变体：用 final_price_info 里 Shopee 实际套用的券（固定额/百分比）套到各自 raw 价，避免自算券的封顶/门槛误差。
+  const pp = json?.data?.product_price || json?.product_price || {};
+  const fpInfo = pp.final_price_info || {};
+  const displayedModelId = fpInfo.model_id ?? pp?.price_model?.price_single_model_id ?? null;
+  const hasFinalPrice = pp.has_final_price === true && Number(pp?.price?.single_value) > 0;
+  const displayedAfterVoucher = hasFinalPrice ? Number(pp.price.single_value) / 100000 : null;
+  const displayedModel = models.find((m) => m.model_id === displayedModelId);
+  const displayedRaw = displayedModel ? (RM(displayedModel.promotion_price) ?? RM(displayedModel.price)) : null;
+  // Shopee 对显示模型实际扣的总折扣额（反推，最可靠：raw − 红价）
+  const displayedVoucher = (displayedAfterVoucher != null && displayedRaw != null && displayedRaw > displayedAfterVoucher)
+    ? Math.round((displayedRaw - displayedAfterVoucher) * 100) / 100 : 0;
+  const shopVoucherType = Number(fpInfo?.final_price_vouchers?.shop_voucher?.voucher_discount_type || 0); // 1=固定额 2=百分比
+  const voucherIsPercent = shopVoucherType === 2;
+  const voucherRate = (voucherIsPercent && displayedRaw > 0) ? displayedVoucher / displayedRaw : 0;
+
   // 每个 model 的 extinfo.tier_index 指向各 tier 的第几个选项，拼成款式名
   const variants = models.map((mdl) => {
     // 从所有 tier 维度重建完整款式名。Shopee 的多维变体(如「Set Package」×「Model+Color」)里，
@@ -80,11 +98,37 @@ export function extractFromPdp(json) {
     if (dims.length && (dims.length >= 2 || !label)) label = dims.join(' / ');
     const price = RM(mdl.price);
     const promo = RM(mdl.promotion_price);
+    const rawSku = promo ?? price;       // 该变体 raw 现价（未扣券）
+
+    // final_display_price 优先级：① 显示模型用 Shopee 算好的 After Voucher（精确）
+    //   ② 其余变体用「实际套用的券」套到 raw ③ 没券 → raw（fallback）
+    let finalDisplay = rawSku;
+    let voucherSource = 'raw_sku';
+    if (mdl.model_id === displayedModelId && displayedAfterVoucher != null) {
+      finalDisplay = displayedAfterVoucher;
+      voucherSource = 'final_price_info(exact)';
+    } else if (displayedVoucher > 0 && rawSku != null) {
+      if (voucherIsPercent) {
+        finalDisplay = Math.round(rawSku * (1 - voucherRate) * 100) / 100;
+        voucherSource = 'applied_voucher(percent)';
+      } else if (rawSku > displayedVoucher) {
+        finalDisplay = Math.round((rawSku - displayedVoucher) * 100) / 100;
+        voucherSource = 'applied_voucher(fixed)';
+      }
+    }
+    const voucherAmount = (rawSku != null && finalDisplay != null)
+      ? Math.round((rawSku - finalDisplay) * 100) / 100 : 0;
+
     return {
       variant: label || '(默认)',
       price,                         // 标价
       promo_price: promo,            // 促销价（有就是它更便宜）
-      current: promo ?? price,       // 现在实际显示的价
+      current: rawSku,               // raw 现价（未扣券，保留原语义）
+      rawSkuPrice: rawSku,           // 显式命名，给下游/debug log 用
+      displayPrice: finalDisplay,    // 页面真实显示的 After Voucher 价（dashboard priceOf 用这个）
+      voucherAmount,                 // = rawSku − displayPrice（实际扣的券额）
+      voucherSource,                 // final_price_info(exact) / applied_voucher(fixed|percent) / raw_sku
+      displayedExact: mdl.model_id === displayedModelId && displayedAfterVoucher != null,
       stock: mdl.stock ?? mdl.normal_stock,
       // 售罄判断：Shopee 的 mdl.stock 常为 null，真正可靠的是 has_stock(布尔)。
       // 严格 === false，避免字段缺失(undefined)时把全部误判成售罄。
@@ -140,18 +184,84 @@ export function extractFromPdp(json) {
   };
 }
 
-// 从 PDP 接口读「店铺 voucher」(比抠页面文字可靠)。
-// 固定额(voucher_discount_type=1):微元 ÷ 100000 = RM。
-// 其它类型(如百分比 type=2):先原样带出、不换算(待真实样本校准),voucherAmount=0。
-export function extractShopVoucher(pdpJson) {
-  const pp = pdpJson?.data?.product_price || pdpJson?.payload?.data?.product_price;
-  const sv = pp?.final_price_info?.final_price_vouchers?.shop_voucher;
-  if (!sv) return null;
-  const type = Number(sv.voucher_discount_type);
-  const raw = Number(sv.voucher_discount) || 0;
-  const code = sv.voucher_code || '';
-  if (type === 1) return { voucherAmount: raw / 100000, voucherType: 'fixed', voucherRaw: raw, code };
-  return { voucherAmount: 0, voucherType: `type${type}`, voucherRaw: raw, code };
+// 微元(Shopee 价格单位) → RM。
+const microToRm = (micro) => Math.round(((Number(micro) || 0) / 100000) * 100) / 100;
+
+// 从 PDP 接口读「实际生效的 voucher」——只信接口，不信页面 banner 的「X% off」文字。
+// Shopee 在 `final_price_info.final_price_vouchers` 下给出它**实际套用**的券（三槽位：
+// shop_voucher / platform_voucher / ads_voucher），每张的 `voucher_discount` 是**已封顶**
+// 的实扣微元额（默认 model）。再用 `shop_vouchers[]` 里的券定义（百分比/封顶/门槛）做逐款重算，
+// 这样便宜变体（10% 未到封顶）和贵变体（封顶）都算得准。返回：
+//   { applied: [{slot, code, percent, cap, minSpend, fixed, resolved, source:'interface'}], total }
+// 历史教训(d3-voucher-pricing)：以前从 DOM 抠「10% off」漏读封顶，把该减 RM240 的算成 RM763。
+// 现在封顶 `discount_cap`/`reward_cap` 直接来自接口券定义，不再自己瞎算百分比。
+export function extractVouchers(pdpJson) {
+  const root = pdpJson?.data || pdpJson?.payload?.data || {};
+  const pp = root.product_price || {};
+  const slots = pp?.final_price_info?.final_price_vouchers || {};
+
+  // 券定义池：含 discount_percentage / discount_cap / min_spend，按 voucher_code 索引。
+  const pool = new Map();
+  for (const sv of (Array.isArray(root.shop_vouchers) ? root.shop_vouchers : [])) {
+    if (sv?.voucher_code) pool.set(String(sv.voucher_code), sv);
+  }
+
+  const applied = [];
+  for (const [slot, sv] of [
+    ['shop', slots.shop_voucher],
+    ['platform', slots.platform_voucher],
+    ['ads', slots.ads_voucher],
+  ]) {
+    if (!sv) continue;
+    const code = String(sv.voucher_code || '');
+    const resolved = microToRm(sv.voucher_discount); // Shopee 已算好的实扣额(默认 model，封顶后)
+    const def = pool.get(code);                      // 券定义(平台券可能不在 shop_vouchers，则为空)
+    applied.push({
+      slot,
+      code,
+      resolved,
+      // 逐款重算参数(全部来自接口券定义，非 banner 文字)；无定义时留 0，逐款回退到 resolved。
+      percent: def ? (Number(def.discount_percentage) || Number(def.reward_percentage) || 0) : 0,
+      cap: def ? microToRm(def.discount_cap || def.reward_cap || 0) : 0,
+      minSpend: def ? microToRm(def.min_spend || 0) : 0,
+      fixed: def ? microToRm(def.discount_value || 0) : 0,
+      source: 'interface',
+    });
+  }
+  const total = Math.round(applied.reduce((s, v) => s + (Number(v.resolved) || 0), 0) * 100) / 100;
+  return { applied, total };
+}
+
+// 逐款实扣额：在所有已套用券里按接口参数算，封顶用接口 cap，门槛用接口 min_spend。
+// 无券定义参数(如平台券)时回退到 Shopee 已算好的 resolved 额。多券默认相加(接口三槽位是叠加设计)。
+// 返回 { amount, slots }：slots = 该款实际有扣额的槽位('shop'/'platform'/'ads')，供上层写 voucher_source。
+export function voucherDeductionDetail(price, applied) {
+  const list = Array.isArray(applied) ? applied : [];
+  const p = Number(price);
+  const known = Number.isFinite(p) && p > 0;
+  let sum = 0;
+  const slots = [];
+  for (const v of list) {
+    const minSpend = Number(v?.minSpend) || 0;
+    if (minSpend > 0 && (!known || p < minSpend)) continue; // 不满足满额门槛
+    let d;
+    if ((Number(v?.percent) || 0) > 0 && known) {
+      d = Math.round(p * (Number(v.percent) / 100) * 100) / 100;
+      const cap = Number(v?.cap) || 0;
+      if (cap > 0) d = Math.min(d, cap);
+    } else if ((Number(v?.fixed) || 0) > 0) {
+      d = Number(v.fixed);
+    } else {
+      d = Number(v?.resolved) || 0; // 无参数兜底：用接口已算好的实扣额
+    }
+    if (d > 0) { sum += d; if (v?.slot) slots.push(String(v.slot)); }
+  }
+  return { amount: Math.round(sum * 100) / 100, slots };
+}
+
+// 仅要金额时的薄封装（保留旧名）。
+export function voucherDeductionForPrice(price, applied) {
+  return voucherDeductionDetail(price, applied).amount;
 }
 
 export async function scrapeProduct(url, { headless = true } = {}) {
@@ -168,7 +278,6 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   const page = await ctx.newPage();
 
   let pdpJson = null;
-  let voucherInfo = { vouchers: [], fixed: 0, percent: 0 };
   const seenApi = []; // 调试：记下看到的所有 api/v4 请求
   // 拦截页面自己发的商品详情接口
   page.on('response', async (res) => {
@@ -209,10 +318,6 @@ export async function scrapeProduct(url, { headless = true } = {}) {
       } catch {}
     }
     try { await ctx.storageState({ path: STATE_FILE }); } catch {}
-    voucherInfo = await extractVoucherInfoFromPage(page);
-    // 合并接口无门槛固定额券；百分比/满减以 DOM 文字为准。
-    const _sv = extractShopVoucher(pdpJson);
-    voucherInfo = { ...voucherInfo, vouchers: mergeApiFixedVoucher(voucherInfo.vouchers, _sv) };
   } finally {
     // 截图留证（看是不是被验证码挡了）
     try { await page.screenshot({ path: 'out/last-page.png', fullPage: false }); } catch {}
@@ -228,9 +333,9 @@ export async function scrapeProduct(url, { headless = true } = {}) {
   if (!result?.variants) {
     throw new Error('Shopee 返回了非商品数据，可能已掉登录态或被软拦截。');
   }
-  const vouchers = voucherInfo.vouchers;
-  const voucherAmount = bestUnconditionalFixed(vouchers);
-  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, vouchers, scrapedAt: new Date().toISOString() };
+  // 只信接口的已套用券(含封顶)，逐款重算放在 runOnce；记录级 voucherAmount = 默认 model 实扣额。
+  const { applied, total } = extractVouchers(pdpJson);
+  return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount: total, vouchers: applied, scrapedAt: new Date().toISOString() };
 }
 
 export async function scrapeProductViaCDP(url, {
@@ -333,10 +438,8 @@ export async function scrapeProductViaCDP(url, {
 
     // 被反爬拦(如 90309999)时：重载页面、等反爬 JS 跑完，再读一次。只有被拦的链接才慢，正常的不受影响。
     const ANTIBOT_RETRY = Number(process.env.HERMES_CDP_ANTIBOT_RETRY || 2);
-    let voucherInfo = { vouchers: [], fixed: 0, percent: 0 };
     let fetchResult = null;
     for (let attempt = 0; attempt <= ANTIBOT_RETRY; attempt += 1) {
-      voucherInfo = await extractVoucherInfoFromRuntime(Runtime);
       fetchResult = await evaluateJson(Runtime, buildPdpFetchExpression(ids));
       const antiBotCode = fetchResult?.payload?.error;
       if (antiBotCode && antiBotCode !== 0 && attempt < ANTIBOT_RETRY) {
@@ -364,17 +467,15 @@ export async function scrapeProductViaCDP(url, {
       throw new Error(`[${fetchResult.errorType || 'cdp_fetch'}] ${fetchResult.errorMessage || '页面内 fetch 失败'}`);
     }
 
-    // 固定额：接口(type 1)无门槛券比 DOM 可靠，合并进券列表；百分比/满减以 DOM 文字为准。
-    const _sv = extractShopVoucher(fetchResult?.payload);
-    const vouchers = mergeApiFixedVoucher(voucherInfo.vouchers, _sv);
-    const voucherAmount = bestUnconditionalFixed(vouchers); // 记录级展示用(无门槛固定额最大值)
+    // 只信接口的已套用券(含封顶)，逐款重算放在 runOnce；记录级 voucherAmount = 默认 model 实扣额。
+    const { applied, total } = extractVouchers(fetchResult?.payload);
 
     const result = extractFromPdp(fetchResult.payload);
     if (!result?.variants) {
       throw new Error('CDP 抓取到的不是商品价格数据，可能当前 Chrome 里的 Shopee 没登录或被软拦截。');
     }
 
-    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount, vouchers, scrapedAt: new Date().toISOString() };
+    return { url, shopId: ids.shopId, itemId: ids.itemId, ...result, voucherAmount: total, vouchers: applied, scrapedAt: new Date().toISOString() };
   } finally {
     try { if (client) await client.close(); } catch {}
     try {
@@ -457,92 +558,6 @@ async function evaluateJson(Runtime, expression) {
 function normalizeVoucherAmount(value) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
-}
-
-function normalizeVoucherInfo(raw) {
-  const list = Array.isArray(raw) ? raw : [];
-  const vouchers = [];
-  for (const v of list) {
-    const fixed = Number(v?.fixed);
-    const percent = Number(v?.percent);
-    const minSpend = Number(v?.minSpend);
-    const f = Number.isFinite(fixed) && fixed > 0 ? fixed : 0;
-    // 百分比上限设 90%，挡住明显误读（如把价格数字当成百分比）。
-    const p = Number.isFinite(percent) && percent > 0 && percent <= 90 ? percent : 0;
-    const m = Number.isFinite(minSpend) && minSpend > 0 ? minSpend : 0;
-    if (f > 0 || p > 0) vouchers.push({ fixed: f, percent: p, minSpend: m });
-  }
-  // fixed/percent = 无门槛券里的最大值，仅供记录级展示/兜底（无法表达门槛）。
-  const free = vouchers.filter((v) => v.minSpend === 0);
-  return {
-    vouchers,
-    fixed: free.reduce((mx, v) => Math.max(mx, v.fixed), 0),
-    percent: free.reduce((mx, v) => Math.max(mx, v.percent), 0),
-  };
-}
-
-// 把接口读到的无门槛固定额店铺券(type 1)并入 DOM 券列表。
-function mergeApiFixedVoucher(vouchers, sv) {
-  const list = Array.isArray(vouchers) ? [...vouchers] : [];
-  if (sv && sv.voucherType === 'fixed' && Number(sv.voucherAmount) > 0) {
-    list.push({ fixed: Number(sv.voucherAmount), percent: 0, minSpend: 0 });
-  }
-  return list;
-}
-
-// 记录级展示用：无门槛固定额券的最大值。
-function bestUnconditionalFixed(vouchers) {
-  return (Array.isArray(vouchers) ? vouchers : [])
-    .filter((v) => !v.minSpend)
-    .reduce((mx, v) => Math.max(mx, Number(v.fixed) || 0), 0);
-}
-
-async function extractVoucherInfoFromPage(page) {
-  try {
-    return normalizeVoucherInfo(await page.evaluate(buildVoucherInfoExpression()));
-  } catch {
-    return { fixed: 0, percent: 0 };
-  }
-}
-
-async function extractVoucherInfoFromRuntime(Runtime) {
-  try {
-    return normalizeVoucherInfo(await evaluateJson(Runtime, buildVoucherInfoExpression()));
-  } catch {
-    return { fixed: 0, percent: 0 };
-  }
-}
-
-// 从 DOM 抠 voucher 文字：每张券带回 {fixed(RM), percent(%), minSpend(满额门槛RM)}。
-// 满减券(如「RM10 off, Min. spend RM500」)的门槛留到 runOnce 按款式价格判定是否生效。
-function buildVoucherInfoExpression() {
-  return String.raw`
-    (() => {
-      const out = [];
-      const allEls = [
-        ...document.querySelectorAll('[class*="voucher"], [class*="Voucher"]'),
-        ...Array.from(document.querySelectorAll('*')).filter((el) => {
-          const text = String(el.textContent || '');
-          return el.children.length === 0 &&
-            /(RM\s*\d+(?:\.\d+)?\s*(?:off|OFF))|(\d+(?:\.\d+)?\s*%\s*(?:off|OFF))/i.test(text) &&
-            text.length < 120;
-        })
-      ];
-      allEls.forEach((el) => {
-        const text = String(el.textContent || '');
-        const f = text.match(/RM\s*(\d+(?:\.\d+)?)\s*(?:off|OFF)/i);
-        const p = text.match(/(\d+(?:\.\d+)?)\s*%\s*(?:off|OFF)/i);
-        if (!f && !p) return;
-        const ms = text.match(/min(?:imum)?\.?\s*spend\s*RM\s*(\d+(?:\.\d+)?)/i);
-        out.push({
-          fixed: f ? parseFloat(f[1]) : 0,
-          percent: p ? parseFloat(p[1]) : 0,
-          minSpend: ms ? parseFloat(ms[1]) : 0,
-        });
-      });
-      return out;
-    })()
-  `;
 }
 
 function buildHealthCheckExpression() {

@@ -49,15 +49,17 @@ async function main() {
   const minGapMin = Number(process.env.HERMES_MIN_SWEEP_GAP_MINUTES || 30);      // 两次抓取最小间隔，防意外连抓
   const manualMinGapMin = Number(process.env.HERMES_MANUAL_MIN_GAP_MINUTES || 5); // 手动触发最小间隔
   const pollSec = Number(process.env.HERMES_TRIGGER_POLL_SEC || 60);             // 听按钮的轮询间隔（只问自家 Worker，不碰 Shopee）
+  const selfSweepMin = Number(process.env.HERMES_SELF_SWEEP_MINUTES || 0);       // 自家店高频单独刷新间隔(分钟)，0=关。自家店=低风控(不同 shop)，可比 competitor 勤抓。
 
   let lastSweepAt = 0;
+  let lastSelfSweepAt = 0; // 0 → 启动后第一轮 loop 立即刷一次自家店（重启/补货后尽快反映库存）
   const ranSlots = new Set(); // key: "YYYY-M-D HH:MM"，跑过的定时点（防当天重复）
 
-  async function doSweep(group, reason) {
+  async function doSweep(group, reason, { guard = true } = {}) {
     const startedAt = new Date().toISOString();
     try {
       const r = await runSweep({ group, reason });
-      lastSweepAt = Date.now();
+      if (guard) lastSweepAt = Date.now(); // 自家店高频轮 guard:false，不占用 competitor 的防连抓窗口
       let cloudLabel = '';
       try {
         const cloud = await syncLatestCloudRecords({ force: true });
@@ -78,6 +80,10 @@ async function main() {
   const schedLabel = times.map(fmtHM).join(' / ');
   logHermes(`Hermes 定时模式启动。每日 ${schedLabel}（首轮含自家店，其余只抓对手）。手动按钮随时可触发。`);
   console.log(`Hermes 已启动（定时 ${schedLabel}，首轮含自家店）`);
+  if (selfSweepMin > 0) {
+    logHermes(`自家店高频刷新已开：每 ${selfSweepMin} 分钟单独抓一轮 self（全部自家店 listing，不影响 competitor 定时点）。`);
+    console.log(`自家店高频刷新：每 ${selfSweepMin} 分钟`);
+  }
 
   // 启动先抓一轮对手；若临近某个定时点（minGap 内）则跳过，交给定时轮，避免短时间连抓两轮。
   if (startupSweep) {
@@ -120,6 +126,19 @@ async function main() {
     // 清掉非今天的已跑标记，避免 set 无限增长
     for (const k of ranSlots) {
       if (!k.startsWith(`${todayKey} `)) ranSlots.delete(k);
+    }
+
+    // 自家店高频轮：每 selfSweepMin 分钟单独抓一轮 self（runSweep('self') 一次抓全部自家店 listing）。
+    // 避开 competitor 定时点窗口（slot 前 10 分钟~后 8 分钟内顺延），免 ~数分钟的 self 抓取吃掉 5 分钟 slot 窗口。
+    // guard:false → 不更新 lastSweepAt，不占用 competitor 的防连抓计时（自家店是低风控、不同 shop）。
+    if (selfSweepMin > 0 && Date.now() - lastSelfSweepAt >= selfSweepMin * 60 * 1000) {
+      const nearScheduledSlot = times.some((t) => cur >= t - 10 && cur < t + 8);
+      if (nearScheduledSlot) {
+        logHermes('自家店高频轮：临近 competitor 定时点，本次顺延（避免抢 slot 窗口）。');
+      } else {
+        lastSelfSweepAt = Date.now();
+        await doSweep('self', 'self-cycle', { guard: false });
+      }
     }
 
     await sleep(pollSec * 1000);
