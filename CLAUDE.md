@@ -9,7 +9,7 @@ PDP 接口 JSON → `src/scraper.mjs extractFromPdp()` 整理出 variants → `d
 
 ## 进行中任务（交接重点）
 
-> 📄 **最新一轮改动详见 [`HANDOFF-2026-06-12.md`](HANDOFF-2026-06-12.md)**（已 push）。下面是滚动状态。
+> 📄 **最新交接详见 [`HANDOFF-2026-06-26.md`](HANDOFF-2026-06-26.md)**（after-voucher 链路修完 + source 标签上线，只 exact 参与比较；遗留 Product Removed 端到端验证；下一步 DOM 逐变体点选）。上一轮见 [`HANDOFF-2026-06-12.md`](HANDOFF-2026-06-12.md)。下面是滚动状态。
 > ✅ **Take Back ← Google Sheets：已上线**（Worker Version `50bcaa16`，commit `158bfe4`；初版 `9793c2b`）。**Google Sheet 是唯一 SoT**：Sheet「Market Price List」Samsung tab **H 列 Take back (S)**，Dashboard **只读显示、不计算**。走 Worker `GET /api/csp`（WebCrypto RS256 JWT，服务账号 `hermes-csp-reader@skilful-boulder-...`，secret 在 Worker）；前端 `fetchCsp()` 启动+每30s+Refresh 拉取，按 `normalizeModelKey().toLowerCase()` 匹配。改 Sheet→Refresh 即见，无需 deploy/重抓。**覆盖：手机(A/S/Z) + 平板 S10/S11**（`/api/csp` count 54）；**Watch/Buds/Fit/配件 待扩展**（改 `parseSkuKey` in d3-worker/src/index.js）。设计手册见 [`DESIGN-takeback-csp.md`](DESIGN-takeback-csp.md)。
 > ✅ **Dashboard 两项已上线**（commit `8a1e795`，仅前端，不影响 key/normalizeModelKey/Take Back/D1/Hermes）：① **🔥 Cheaper Than Us filter**——legend 按钮，一键只显示 `competitor lowest < our lowest` 的型号，`N = gaps.length`；`selectedRole='cheaper'` 是 boss 表伪过滤(`activeBossRole()` 对它返回 '' 不在记录层筛角色)。② **型号排序**：`modelSortKey`(index.html ~2674) 类别 A→S→**Z(Fold/Flip 属手机)**→Tablet→Watch/Buds（Z=2/Tab=3）。
 
