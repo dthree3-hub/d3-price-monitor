@@ -1940,6 +1940,7 @@ function normalizeVariant(variant, context = {}) {
     // 逐款 voucher 实扣额(RM) + 来源：interface(接口真实) / estimated(兜底估算) / 空(无券)。
     // buyer 可见价(后台按封顶券算好的 display_price)；缺省回退 currentPrice 由 priceOf 处理。
     displayPrice: toNumberOrNull(variant.displayPrice),
+    voucherSource: String(variant.voucherSource || ''), // product_not_exist → dashboard 显示 Product Removed
   };
 }
 
@@ -2874,6 +2875,7 @@ function escapeAttribute(value) {
     const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价
     const selfTiers = {}; // 我们自己的 Basic / Promo 分价
     const selfMeta = {}; // mk → {hasAny,hasAvail}：自家是否有记录 / 是否有可买变体（判 Not Available）
+    const removedMeta = {}; // mk → {role: true}：该 listing 被 scraper 标 product_not_exist（链接真的没了）→ Product Removed
     const sources = new Map(); // mk → [{title,shopId,itemId,sellerName,role}]
     for (const r of latest) {
       const role = SHOP_ROLES[String(r.shopId)];
@@ -2892,6 +2894,17 @@ function escapeAttribute(value) {
         };
         // self(我们公司)是「我们的价」基准列，切到任何对手 tab 都要保留 → 豁免 bossRole 过滤；仍受搜索/系列/型号筛选
         if (typeof matchesCurrentFilters === 'function' && !matchesCurrentFilters(rowForFilters, role === 'self' ? { includeBossRole: false } : {})) continue;
+        // 商品已下架(scraper 标 product_not_exist：链接真的没了)→ 记 removed 标记，渲染显示 Product Removed。
+        // 在 currentPrice==null 跳过之前判，因为 not-selling 记录就是 null 价。
+        if (v.voucherSource === 'product_not_exist') {
+          const mkR = modelKeyOf(r.title, v, (window.D3_ITEM_MODEL || {})[String(r.itemId)]);
+          if (mkR && !EXCLUDED_MODELS.has(mkR.toLowerCase())) {
+            if (!removedMeta[mkR]) removedMeta[mkR] = {};
+            removedMeta[mkR][role] = true;
+            if (!models.has(mkR)) models.set(mkR, {}); // 让该型号行出现(即使全下架没价)，才能显示 Product Removed
+          }
+          continue;
+        }
         if (v.currentPrice == null) continue;
         const effectivePrice = effectivePriceOf(v);
         if (effectivePrice == null) continue;
@@ -2931,11 +2944,11 @@ function escapeAttribute(value) {
         }
       }
     }
-    return { models, selfPrices, selfTiers, selfMeta, sources };
+    return { models, selfPrices, selfTiers, selfMeta, removedMeta, sources };
   }
 
   function bossRender() {
-    const { models, selfPrices, selfTiers, selfMeta, sources } = build();
+    const { models, selfPrices, selfTiers, selfMeta, removedMeta, sources } = build();
     document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
 
     const modelKeys = [...models.keys()].sort((a, b) => modelSortKey(a).localeCompare(modelSortKey(b)));
@@ -3016,6 +3029,8 @@ function escapeAttribute(value) {
         if (byRole[L] && byRole[L].min < (best ? best.price : Infinity)) best = { role: L, price: byRole[L].min };
       }
       const cells = visibleRoles.map((L) => {
+        // 链接真的没了(product_not_exist) → Product Removed，区别于「商品还在但不可卖」的 Not Available。
+        if (removedMeta[mk] && removedMeta[mk][L]) return '<td class="empty-cell"><span class="removed" style="color:#c0392b;font-weight:600">Product Removed</span></td>';
         const rd = byRole[L];
         if (!rd || !rd.hasAny) return '<td class="empty-cell"><span class="not-selling">Not Selling</span></td>';
         // 该 model+capacity 有记录但全部灰掉/不可选 → Not Available（规则 2/3）。
@@ -3052,6 +3067,9 @@ function escapeAttribute(value) {
           return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span></div>`;
         }).join('');
         ourCell = `<div class="tier-stack">${rows}</div>`;
+      } else if (removedMeta[mk] && removedMeta[mk].self) {
+        // 自家这个 listing 链接没了(product_not_exist) → Product Removed。
+        ourCell = '<span class="removed" style="color:#c0392b;font-weight:600">Product Removed</span>';
       } else if (manual == null && selfMeta[mk] && selfMeta[mk].hasAny && !selfMeta[mk].hasAvail) {
         // 自家这个 model+capacity 有记录但全部灰掉/不可选 → Not Available（仍可手动填价覆盖）。
         ourCell = '<span class="na-cell">Not Available</span>';
