@@ -1571,6 +1571,16 @@ function priceOf(row) {
   const p = Number(row.currentPrice);
   return Number.isFinite(p) ? p : null;
 }
+// 价格来源标记。exact=display_model 那个变体的页面真红价(可信,参与 gap/最低价/高亮)；
+// estimated=同一套券套到 raw 估算(只显示+标 est,不参与比较,避免误判谁便宜)；
+// raw=原价/无券/旧 fallback；removed=已下架。注：逐变体 DOM 点选(真 exact_selected)是后续工程。
+function priceSourceOf(v) {
+  const s = v && v.voucherSource;
+  if (s === 'final_price_info(exact)') return 'exact';
+  if (typeof s === 'string' && s.indexOf('applied_voucher') === 0) return 'estimated';
+  if (s === 'product_not_exist') return 'removed';
+  return 'raw';
+}
 const SHOP_ROLE_BY_SHOP = {
   '116917349': 'A',
   '77792787': 'B',
@@ -2872,8 +2882,9 @@ function escapeAttribute(value) {
     const latest = latestPerShopItem(records);
 
     const models = new Map();
-    const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价
+    const selfPrices = {}; // 标成「我们」的店 → 每个机型最低价(只含 exact 可信价)
     const selfTiers = {}; // 我们自己的 Basic / Promo 分价
+    const selfTiersSrc = {}; // mk → {tier: source}：每档价的来源(exact/estimated/raw)，渲染标 source
     const selfMeta = {}; // mk → {hasAny,hasAvail}：自家是否有记录 / 是否有可买变体（判 Not Available）
     const removedMeta = {}; // mk → {role: true}：该 listing 被 scraper 标 product_not_exist（链接真的没了）→ Product Removed
     const sources = new Map(); // mk → [{title,shopId,itemId,sellerName,role}]
@@ -2923,32 +2934,35 @@ function escapeAttribute(value) {
         // 全灰时显示 Not Available。字段缺失（本地导入/旧数据）按可买处理；单色灰只是被排除在 min 外，
         // 不影响同一 model+capacity 其它颜色的正常价（满足规则 1/4）。
         const isAvail = v.available !== false;
+        // 价格来源：只有 exact(display_model 真红价)参与 gap/最低价/cheaper；
+        // estimated/raw 只显示+标 source，不计入 min，避免拿估算价误判谁便宜/谁比我们低。
+        const psrc = priceSourceOf(v);
         if (role === 'self') {
           if (!selfMeta[mk]) selfMeta[mk] = { hasAny: false, hasAvail: false };
           selfMeta[mk].hasAny = true;
           if (isAvail) {
             selfMeta[mk].hasAvail = true;
-            selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
-            if (!selfTiers[mk]) selfTiers[mk] = {};
-            selfTiers[mk][ct] = Math.min(selfTiers[mk][ct] == null ? Infinity : selfTiers[mk][ct], effectivePrice);
+            if (psrc === 'exact') selfPrices[mk] = Math.min(selfPrices[mk] == null ? Infinity : selfPrices[mk], effectivePrice);
+            if (!selfTiers[mk]) { selfTiers[mk] = {}; selfTiersSrc[mk] = {}; }
+            if (selfTiers[mk][ct] == null || effectivePrice < selfTiers[mk][ct]) { selfTiers[mk][ct] = effectivePrice; selfTiersSrc[mk][ct] = psrc; }
           }
           continue;
         }
         const byRole = models.get(mk);
-        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {}, hasAny: false, hasAvail: false };
+        if (!byRole[role]) byRole[role] = { min: Infinity, tiers: {}, tiersSrc: {}, hasAny: false, hasAvail: false };
         byRole[role].hasAny = true;
         if (isAvail) {
           byRole[role].hasAvail = true;
-          byRole[role].min = Math.min(byRole[role].min, effectivePrice);
-          byRole[role].tiers[ct] = Math.min(byRole[role].tiers[ct] == null ? Infinity : byRole[role].tiers[ct], effectivePrice);
+          if (psrc === 'exact') byRole[role].min = Math.min(byRole[role].min, effectivePrice); // 只 exact 参与 gap/最低价
+          if (byRole[role].tiers[ct] == null || effectivePrice < byRole[role].tiers[ct]) { byRole[role].tiers[ct] = effectivePrice; byRole[role].tiersSrc[ct] = psrc; }
         }
       }
     }
-    return { models, selfPrices, selfTiers, selfMeta, removedMeta, sources };
+    return { models, selfPrices, selfTiers, selfTiersSrc, selfMeta, removedMeta, sources };
   }
 
   function bossRender() {
-    const { models, selfPrices, selfTiers, selfMeta, removedMeta, sources } = build();
+    const { models, selfPrices, selfTiers, selfTiersSrc, selfMeta, removedMeta, sources } = build();
     document.querySelectorAll('.roles, .role-chip').forEach((node) => node.remove());
 
     const modelKeys = [...models.keys()].sort((a, b) => modelSortKey(a).localeCompare(modelSortKey(b)));
@@ -3041,9 +3055,12 @@ function escapeAttribute(value) {
         const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
           const val = tiers[k];
           if (val == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="not-selling">Not Selling</span></div>`;
-          const cheaper = our != null && val < our;
-          const hi = cheaper && isLowestComp && val === rd.min; // 只有低过我们时才高亮
-          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num${hi ? ' lowest' : ''}${cheaper ? ' cheaper' : ''}">${fmt(val)}</span></div>`;
+          const src = (rd.tiersSrc && rd.tiersSrc[k]) || 'raw';
+          const trust = src === 'exact';
+          const cheaper = trust && our != null && val < our; // 只有 exact 真红价才算 cheaper(防误判)
+          const hi = cheaper && isLowestComp && val === rd.min; // 高亮最低也只 exact
+          const tag = trust ? '' : `<span style="font-size:0.72em;margin-left:3px;color:${src === 'estimated' ? '#e67e22' : '#aaa'}">${src === 'estimated' ? 'est' : 'raw'}</span>`;
+          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num${hi ? ' lowest' : ''}${cheaper ? ' cheaper' : ''}">${fmt(val)}</span>${tag}</div>`;
         }).join('');
         return `<td><div class="tier-stack">${rows}</div></td>`;
       }).join('');
@@ -3064,7 +3081,9 @@ function escapeAttribute(value) {
         const extraKeys = Object.keys(st).filter((k) => !TIER_ORDER.includes(k));
         const rows = [...TIER_ORDER, ...extraKeys].map((k) => {
           if (st[k] == null) return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="not-selling">Not Selling</span></div>`;
-          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span></div>`;
+          const ssrc = (selfTiersSrc[mk] && selfTiersSrc[mk][k]) || 'raw';
+          const stag = ssrc === 'exact' ? '' : `<span style="font-size:0.72em;margin-left:3px;color:${ssrc === 'estimated' ? '#e67e22' : '#aaa'}">${ssrc === 'estimated' ? 'est' : 'raw'}</span>`;
+          return `<div class="tier-row"><span class="tier-tag">${esc(k)}</span> <span class="price-num">${fmt(st[k])}</span>${stag}</div>`;
         }).join('');
         ourCell = `<div class="tier-stack">${rows}</div>`;
       } else if (removedMeta[mk] && removedMeta[mk].self) {
