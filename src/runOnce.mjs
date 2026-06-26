@@ -127,7 +127,43 @@ function variantVoucher(price, vouchers, shopId) {
   return fb > 0 ? { amount: fb, source: 'estimated' } : { amount: 0, source: '' };
 }
 
+// Shopee 商品不存在/已下架(scraper 检测到 health.notFound)：构造一条 Not Selling 记录
+// (available=false, currentPrice/displayPrice=null)。走正常 sync → worker「先清后插」DELETE 该 item
+// 旧行 + INSERT 这条 null 价行 → D1 清掉旧价、dashboard 显示 Not Available，而不是 fallback 旧价。
+function buildNotSellingRecord(product, scraped) {
+  const seller = scraped.sellerName || product.competitor || '';
+  const parsed = parseVariantDescriptor(String(product.our_product || product.keyword || ''), { ourProduct: product.our_product, itemModel: product.our_product });
+  const model = parsed.model || String(product.our_product || '').trim() || '(removed)';
+  if (process.env.HERMES_PRICE_DEBUG === '1') {
+    logHermes(`[price] ${JSON.stringify({ seller, url: product.product_url, package: '', model, raw_sku_price: null, visible_dom_price: null, visible_after_voucher_price: null, final_display_price: null, voucher_amount: 0, voucher_source: 'product_not_exist', not_found: true, reason: scraped.reason || 'product_not_exist', ts: scraped.scrapedAt || new Date().toISOString() })}`);
+  }
+  // Failed/Not-Selling listing 审计行：seller | model | product_not_exist | url
+  logHermes(`[not_selling] ${seller} | ${model} | product_not_exist | ${product.product_url}`);
+  return attachCompetitorMeta({
+    schemaVersion: 1,
+    grabbedAt: scraped.scrapedAt || new Date().toISOString(),
+    pageUrl: product.product_url,
+    shopId: scraped.shopId,
+    itemId: scraped.itemId,
+    sellerName: seller,
+    title: scraped.title || product.our_product || '(removed)',
+    currency: 'MYR',
+    voucherAmount: 0,
+    voucherSource: '',
+    soldOut: true,
+    notExist: true,
+    reason: scraped.reason || 'product_not_exist',
+    variants: [{
+      name: '(product not exist)', model, capacity: '', tier: '', color: '',
+      currentPrice: null, displayPrice: null, originalPrice: null, promoPrice: null,
+      stock: 0, inStock: false, available: false,
+      voucherAmount: 0, voucherSource: 'product_not_exist',
+    }],
+  }, product);
+}
+
 function normalizeScrapedProduct(product, scraped) {
+  if (scraped && scraped.notExist) return buildNotSellingRecord(product, scraped);
   const voucherFixed = toNonNegativeNumberOrZero(scraped.voucherAmount);
   const vouchers = Array.isArray(scraped.vouchers) ? scraped.vouchers : [];
   // 记录级 source：listing 上有哪些接口槽位券(仅作 variant 缺省时兜底，逐款 source 才是权威)。

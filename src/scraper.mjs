@@ -412,6 +412,23 @@ export async function scrapeProductViaCDP(url, {
     let health = await evaluateJson(Runtime, buildHealthCheckExpression());
     if (!health) throw new Error('CDP 无法读取页面状态。');
 
+    // 商品不存在/已下架(Shopee 明确文案)：不进 fetch/voucher/final_price_info，直接返回 notExist。
+    // 下游(runOnce)据此把该 listing 标 Not Selling、清掉 D1 旧价，而不是 fallback 旧价或当抓取失败重试。
+    if (health.notFound) {
+      console.error(`[not_found] url=${url} page_title=${JSON.stringify(health.title || '')} not_found_detected=true reason=product_not_exist`);
+      try {
+        const shot = await Page.captureScreenshot({ format: 'png' });
+        if (shot?.data) fs.writeFileSync('out/last-page.png', Buffer.from(shot.data, 'base64'));
+      } catch {}
+      return {
+        url, shopId: ids.shopId, itemId: ids.itemId,
+        notExist: true, reason: 'product_not_exist', pageTitle: health.title || '',
+        title: health.title || '', sellerName: '',
+        variants: [], vouchers: [], voucherAmount: 0,
+        scrapedAt: new Date().toISOString(),
+      };
+    }
+
     if (health.isLoginPage) {
       throw new Error('CDP 页面当前是 Shopee 登录页，需先在真实 Chrome 登录。');
     }
@@ -571,7 +588,10 @@ function buildHealthCheckExpression() {
         readyState: document.readyState || '',
         isLoginPage: /login/i.test(href) || /log\\s*in/i.test(text),
         hasLoadingIssue: /Loading Issue/i.test(text),
-        hasUnavailable: /Page Unavailable/i.test(text)
+        hasUnavailable: /Page Unavailable/i.test(text),
+        // 商品不存在/已下架：只认 Shopee 明确文案，绝不误判 loading(空白)/anti-bot(验证码)。
+        // captcha/verify/blank 页都不含这些字串 → 仍走原 retry/fail 路径。
+        notFound: /the product (doesn'?t|does not) exist|this product (doesn'?t|does not) exist|product (doesn'?t|does not) exist|no longer (exists|available)|has been (deleted|removed)/i.test(text)
       };
     })()
   `;
