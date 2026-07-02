@@ -2652,6 +2652,9 @@ function escapeAttribute(value) {
   // Take Back ← Google Sheet「Take back (S)」(只读显示，不计算)。键 = normalizeModelKey(...).toLowerCase()
   // 大小写不敏感(Sheet 是 "S25 ULTRA"、dashboard 是 "S25 Ultra")。localStorage 兜底=API 失败时保留上次值。
   let takeBackByKey = load(TAKEBACK_KEY, {});
+  // [2026-07-02] 撤掉 2026-06-29 的 A27 硬编码 override(1207.46 抄的是 Take back (L)，列拿错)。
+  // Sheet mapping 已查实可用：/api/csp "A27 5G 256GB"(Take back (S)=1175.37) 经 normalizeModelKey
+  // → "a27 256gb"，与 boss 行 key 一致。Take Back 一律以 Sheet H 列为唯一 SoT，不再本地覆盖。
   let selectedRole = null; // null = 显示全部；'A'..'D' = 只看某对手比我们便宜的型号
   window.D3_BOSS_SELECTED_ROLE = selectedRole;
 
@@ -3198,7 +3201,7 @@ function escapeAttribute(value) {
           map[normalizeModelKey(rawKey).toLowerCase()] = tb; // 与 dashboard mk 一致(大小写不敏感)
         }
         takeBackByKey = map;
-        save(TAKEBACK_KEY, map); // 缓存最近一次成功值
+        save(TAKEBACK_KEY, takeBackByKey); // 缓存最近一次成功值
         bossRender();
       }
       // d.ok===false / 无 rows → 保留上次值（takeBackByKey 不动）
