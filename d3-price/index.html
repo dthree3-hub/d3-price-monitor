@@ -2615,6 +2615,8 @@ function escapeAttribute(value) {
   .not-selling{color:#9c8f80;font-style:italic;font-size:13px} /* 该档位/商家没在卖(no price)。仅显示,不参与计算。 */
   .boss-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .boss-table{min-width:1000px} /* 窄屏时横向滚动,保留列宽可读 */
+  .boss-table thead th{position:sticky;top:0;z-index:5;box-shadow:inset 0 -1px 0 #eadcc8,inset -1px 0 0 #eadcc8} /* border-collapse 下边框不随 sticky 走,用 inset shadow 补线 */
+  @media (min-width:1280px){.boss-scroll{overflow-x:visible}} /* overflow-x:auto 会把 sticky 锁在容器内;宽屏表格放得下,放开后表头才能随页面滚动固定 */
   .scroll-hint{font-size:12px;color:#9c8f80;font-style:italic;text-align:center;margin:6px 0}
   @media (min-width:1280px){.scroll-hint{display:none}} /* 宽屏放得下就不显示提示 */
   .boss-details{margin-top:4px}
