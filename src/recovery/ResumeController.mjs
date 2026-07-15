@@ -31,6 +31,25 @@ async function tryTask(taskFn) {
   }
 }
 
+// CDP 调用在 renderer 卡死/target 丢失时可能既不 resolve 也不 reject（.catch 救不了），
+// 例如 /verify/traffic 拦截页上 Page.captureScreenshot 永不返回（2026-07-15 实际卡死过：
+// verification_detected 之后整个进程挂死，连 3 分钟 timeout 都到不了）。
+// 所以恢复流程里的每个 adapter 调用都包一层硬超时，超时按该调用原本的失败 fallback 处理。
+const CDP_CALL_TIMEOUT_MS = Number(process.env.HERMES_RECOVERY_CDP_TIMEOUT_MS || 30000);
+async function withTimeout(run, fallback, ms = CDP_CALL_TIMEOUT_MS) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(run),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); }),
+    ]);
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // 等待页面恢复正常：轮询 detect()，或读到 abort/resume 信号。
 async function waitForClear(adapter, { maxWaitMinutes, pollSec, notifier, detection }) {
   const deadline = Date.now() + maxWaitMinutes * 60 * 1000;
@@ -42,7 +61,7 @@ async function waitForClear(adapter, { maxWaitMinutes, pollSec, notifier, detect
     // anti_bot 软拦不靠 DOM 判「清掉了」(页面未必有可识别的验证元素),
     // 只认人工 /resume(或 /abort)或超时 —— 这样它会真的等你把验证过完再续。
     if (detection?.type !== VERIFICATION_TYPES.ANTI_BOT) {
-      const current = await adapter.detect().catch(() => null);
+      const current = await withTimeout(() => adapter.detect(), null);
       if (current && !current.blocked) return { outcome: 'cleared', detection: current };
     }
 
@@ -77,7 +96,7 @@ export async function runWithRecovery(taskFn, {
       // 把抛出的错误归类(如 Shopee 90309999 反爬码)→ 暂停那一条,等人工过验证再续
       detection = { blocked: true, type: classifyError(attempt.error), title: '', url: taskContext.url || '', reasons: ['from-error'] };
     } else {
-      detection = await adapter.detect().catch(() => null);
+      detection = await withTimeout(() => adapter.detect(), null);
     }
 
     // 任务成功且页面不是拦路页 -> 正常返回。
@@ -118,8 +137,8 @@ export async function runWithRecovery(taskFn, {
     });
 
     // 保存现场（URL/上下文/截图/检查点）+ 保存当前会话。
-    const state = await adapter.captureState({ detection, taskContext }).catch(() => ({}));
-    const savedSummary = await adapter.captureSession().catch(() => null);
+    const state = await withTimeout(() => adapter.captureState({ detection, taskContext }), {});
+    const savedSummary = await withTimeout(() => adapter.captureSession(), null);
     logRecoveryEvent('session_saved', { type: detection.type, ...(savedSummary || {}) });
 
     // 通知人（标题 + URL + 截图）。
@@ -156,8 +175,8 @@ export async function runWithRecovery(taskFn, {
     logRecoveryEvent(RECOVERY_EVENTS.VERIFICATION_COMPLETED, { type: detection.type, url: detection.url, via: waited.outcome });
 
     // === 4) 会话已恢复（保存已验证会话，并灌回以便后续复用） ===
-    const verifiedSummary = await adapter.captureSession().catch(() => null);
-    await adapter.restoreSession?.().catch(() => {});
+    const verifiedSummary = await withTimeout(() => adapter.captureSession(), null);
+    await withTimeout(() => adapter.restoreSession?.(), undefined);
     logRecoveryEvent(RECOVERY_EVENTS.SESSION_RESTORED, { type: detection.type, ...(verifiedSummary || {}) });
     await notifier?.notifyResumed({ type: detection.type, url: detection.url, sessionSummary: verifiedSummary }).catch(() => {});
 
